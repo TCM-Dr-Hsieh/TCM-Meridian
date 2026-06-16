@@ -433,7 +433,6 @@ professor_XX/
 
 ```gitignore
 config.json
-.claude/
 patient_data/
 **/log/
 **/__pycache__/

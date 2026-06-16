@@ -142,8 +142,6 @@ pip install -r requirements.txt
 - `numpy`
 - `requests`
 
-（教授 RAG 的 embedding 由自寫的 `LMStudioEmbeddings`（透過 `requests` 呼叫 OpenAI-compatible embedding endpoint）取得，不需 `sentence-transformers` 等本地 embedding 套件。）
-
 ## 快速開始
 
 1. 安裝依賴。

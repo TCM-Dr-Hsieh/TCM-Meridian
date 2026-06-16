@@ -1,97 +1,95 @@
 {
-  "_comment": "複製本檔為 config.json 後填入你自己的 API endpoint / key / 模型名稱。config.json 已被 .gitignore 排除，不會進版控。所有 LLM client 採 OpenAI-compatible API（可用 LM Studio、OpenRouter 等）。",
   "main_agent": {
-    "api_url": "http://localhost:1234/v1",
-    "api_key": "lm-studio",
-    "model_name": "",
-    "max_tokens": 4000,
-    "temperature": 0.7,
-    "max_sub_turns": 10,
-    "history_summary_review_rounds": 3,
+    "api_url": "https://openrouter.ai/api/v1",
+    "api_key": "KEY",
+    "model_name": "google/gemini-3-flash-preview",
+    "max_tokens": 90000,
+    "temperature": 1.0,
+    "max_sub_turns": 30,
     "history_summary": {
-      "api_url": "http://localhost:1234/v1",
-      "api_key": "lm-studio",
-      "model_name": "",
-      "max_tokens": 4000,
-      "temperature": 0.5
+      "api_url": "https://openrouter.ai/api/v1",
+      "api_key": "KEY",
+      "model_name": "google/gemini-3-flash-preview",
+      "max_tokens": 90000,
+      "temperature": 1.0
     },
     "summary_exit": {
-      "api_url": "http://localhost:1234/v1",
-      "api_key": "lm-studio",
-      "model_name": "",
-      "max_tokens": 128,
-      "temperature": 0.2
+      "api_url": "https://openrouter.ai/api/v1",
+      "api_key": "KEY",
+      "model_name": "google/gemini-3-flash-preview",
+      "max_tokens": 90000,
+      "temperature": 1.0
     },
-    "history_summary_model_name": "",
-    "summary_exit_model_name": ""
+    "history_summary_model_name": "google/gemini-3-flash-preview",
+    "summary_exit_model_name": "google/gemini-3-flash-preview"
   },
   "record_subagent": {
-    "api_url": "http://localhost:1234/v1",
-    "api_key": "lm-studio",
-    "model_name": "",
-    "max_tokens": 8000,
-    "temperature": 0.7
+    "api_url": "https://openrouter.ai/api/v1",
+    "api_key": "KEY",
+    "model_name": "google/gemini-3-flash-preview",
+    "max_tokens": 90000,
+    "temperature": 1.0
   },
   "hallucination_subagent": {
-    "api_url": "http://localhost:1234/v1",
-    "api_key": "lm-studio",
-    "model_name": "",
-    "max_tokens": 8000,
+    "api_url": "https://openrouter.ai/api/v1",
+    "api_key": "KEY",
+    "model_name": "google/gemini-3-flash-preview",
+    "max_tokens": 90000,
     "temperature": 1.0,
     "detection_strength": 2,
-    "max_review_rounds": 5
+    "max_review_rounds": 10
   },
   "ic_subagent": {
-    "api_url": "http://localhost:1234/v1",
-    "api_key": "lm-studio",
-    "model_name": "",
-    "max_tokens": 20000,
-    "temperature": 0.7,
+    "api_url": "https://openrouter.ai/api/v1",
+    "api_key": "KEY",
+    "model_name": "google/gemini-3-flash-preview",
+    "max_tokens": 90000,
+    "temperature": 1.0,
     "max_collection_rounds": 10
   },
   "lc_subagent": {
-    "api_url": "http://localhost:1234/v1",
-    "api_key": "lm-studio",
-    "model_name": "",
-    "max_tokens": 20000,
+    "api_url": "https://openrouter.ai/api/v1",
+    "api_key": "KEY",
+    "model_name": "openai/gpt-5.4-mini",
+    "max_tokens": 90000,
     "temperature": 1.0,
-    "max_scan_rounds": 8,
+    "max_scan_rounds": 10,
     "detection_strength": 4
   },
   "nr_subagent": {
-    "api_url": "http://localhost:1234/v1",
-    "api_key": "lm-studio",
-    "model_name": "",
-    "max_tokens": 20000,
+    "api_url": "https://openrouter.ai/api/v1",
+    "api_key": "KEY",
+    "model_name": "google/gemini-3-flash-preview",
+    "max_tokens": 90000,
     "temperature": 1.0
   },
   "professor_config": {
     "answer": {
-      "api_url": "http://localhost:1234/v1",
-      "api_key": "lm-studio",
-      "model_name": "",
-      "max_tokens": 20000,
-      "temperature": 0.7
+      "api_url": "https://openrouter.ai/api/v1",
+      "api_key": "KEY",
+      "model_name": "google/gemini-3-flash-preview",
+      "max_tokens": 90000,
+      "temperature": 1.0
     },
     "embedding": {
-      "api_url": "http://localhost:1234/v1",
-      "api_key": "lm-studio",
-      "model_name": ""
+      "api_url": "https://openrouter.ai/api/v1",
+      "api_key": "KEY",
+      "model_name": "qwen/qwen3-embedding-4b"
     },
     "query_expansion": {
-      "api_url": "http://localhost:1234/v1",
-      "api_key": "lm-studio",
-      "model_name": ""
+      "api_url": "https://openrouter.ai/api/v1",
+      "api_key": "KEY",
+      "model_name": "google/gemini-3-flash-preview"
     },
     "prefix": {
-      "api_url": "http://localhost:1234/v1",
-      "api_key": "lm-studio",
-      "model_name": ""
+      "api_url": "https://openrouter.ai/api/v1",
+      "api_key": "KEY",
+      "model_name": "google/gemini-3-flash-preview"
     },
     "rerank": {
-      "api_url": "http://localhost:1234/v1",
-      "api_key": "lm-studio",
-      "model_name": ""
+      "api_url": "https://openrouter.ai/api/v1",
+      "api_key": "KEY",
+      "model_name": "openai/gpt-4o-mini"
     }
   }
 }

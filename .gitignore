@@ -1,0 +1,38 @@
+# ── 機密：絕不進版控 ──
+# 含真實 API key；改用環境變數，並附 config.example.json 供他人填寫
+config.json
+
+# ── 隱私：患者資料 ──
+# 排除 patient_data/ 內所有患者，保護未來看診時產生的真實病歷
+# （目前不附帶示範患者；app 啟動時會自動建立空的 patient_data/，
+#  clone 的人可在 UI 自行建立測試患者，30 秒即可）
+patient_data/*
+
+# ── Claude Code 本機工具設定（不進版控）──
+.claude/
+
+# ── Python ──
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# ── 編輯器 / 系統 ──
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ── 教授向量索引：build artifact，不進版控 ──
+# 只發布知識庫原始檔 professor_*/doc/*.txt；向量索引可由 doc/ 重現，
+# 請 clone 後在「教授設定」點「建立資料庫」重建（本機重建測試後也不會誤 commit）。
+professor_*/chroma_doc_index/
+professor_*/parent_map.jsonl
+
+# ── 注意：未來自建的教授若用到版權教材，請手動在此排除整個資料夾 ──
+# 例如：
+# professor_99/
+#
+# 目前附帶 professor_01（自編安全清單）、professor_02（醫宗金鑑，公眾領域古籍）
+# 只發布 doc/ 原始知識庫 + prompt + Description.txt；向量索引不發布，由使用者重建。

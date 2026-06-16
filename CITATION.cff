@@ -1,0 +1,34 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "TCM-Meridian (杏林經緯): A multi-agent, safety-oriented AI clinical assistant for Traditional Chinese Medicine"
+abstract: >-
+  TCM-Meridian (杏林經緯) is a physician-supervised, multi-agent AI workbench for
+  Traditional Chinese Medicine. A ReAct main agent orchestrates specialised
+  sub-agents (record writing, hallucination review, information collection,
+  low-confidence annotation, note completeness check) and a traceable
+  Retrieval-Augmented Generation (RAG) "professor" consultation module, with
+  fail-closed safety gates, source attribution, and full multi-agent behaviour logging.
+type: software
+authors:
+  - family-names: Hsieh
+    given-names: Hong-Wen
+    # orcid: "https://orcid.org/0000-0000-0000-0000"   # ← 有 ORCID 可填上（建議申請，免費）
+license: Apache-2.0
+repository-code: "https://github.com/<YOUR_GITHUB_USERNAME>/TCM-Meridian"   # ← 建 repo 後改成實際網址
+url: "https://github.com/<YOUR_GITHUB_USERNAME>/TCM-Meridian"               # ← 同上
+version: "1.0.0"                # ← 對應你的第一個 GitHub Release tag
+date-released: "2026-06-16"     # ← 改成實際發布日期
+keywords:
+  - traditional chinese medicine
+  - multi-agent system
+  - retrieval-augmented generation
+  - clinical decision support
+  - large language models
+  - electronic medical records
+  - AI safety
+# 取得 Zenodo DOI 後，取消下面註解並填入（同時可在 README 放 DOI badge）：
+# doi: "10.5281/zenodo.XXXXXXX"
+# identifiers:
+#   - type: doi
+#     value: "10.5281/zenodo.XXXXXXX"
+#     description: "Archived release on Zenodo"

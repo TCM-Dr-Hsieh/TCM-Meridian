@@ -1,0 +1,30 @@
+# TCM-Meridian - Requirements
+# 中醫智慧診療系統依賴套件
+# 開發環境: conda env TCM_dev_new
+#
+# 注意：
+# 本版本使用 NiceGUI 作為 UI 介面。
+
+# ============== 核心套件 ==============
+nicegui==3.12.1                  # UI 介面
+openai==1.98.0                   # OpenAI API 客戶端（用於 LLM 通訊）
+
+# ============== 向量資料庫與檢索 ==============
+chromadb==1.0.15                 # 向量資料庫
+langchain==0.3.26                # LLM 應用框架
+langchain-community==0.3.27      # LangChain 社群整合（Chroma 等）
+
+# ============== 文字處理與檢索 ==============
+numpy==1.26.4                    # 數值計算
+requests==2.32.4                 # HTTP 請求（LM Studio API）
+
+# ============== 可選套件（進階功能）==============
+# torch>=2.0.0                   # 若使用本地 GPU embedding
+# transformers>=4.0.0            # 若使用本地 HuggingFace 模型
+# faiss-cpu>=1.7.0               # 若使用 FAISS 向量檢索（本專案用 ChromaDB）
+
+# ============== 安裝指令 ==============
+# pip install -r requirements.txt
+#
+# 若使用 GPU 版本 PyTorch：
+# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128

@@ -12,12 +12,12 @@ type: software
 authors:
   - family-names: Hsieh
     given-names: Hong-Wen
-    # orcid: "https://orcid.org/0000-0000-0000-0000"   # ← 有 ORCID 可填上（建議申請，免費）
+    # orcid: "https://orcid.org/0009-0008-1676-6170"  
 license: Apache-2.0
-repository-code: "https://github.com/<YOUR_GITHUB_USERNAME>/TCM-Meridian"   # ← 建 repo 後改成實際網址
-url: "https://github.com/<YOUR_GITHUB_USERNAME>/TCM-Meridian"               # ← 同上
+repository-code: "https://github.com/TCM-Dr-Hsieh/TCM-Meridian"   
+url: "https://github.com/TCM-Dr-Hsieh/TCM-Meridian"              
 version: "1.0.0"                # ← 對應你的第一個 GitHub Release tag
-date-released: "2026-06-16"     # ← 改成實際發布日期
+date-released: "2026-06-18"  
 keywords:
   - traditional chinese medicine
   - multi-agent system

@@ -12,12 +12,12 @@ type: software
 authors:
   - family-names: Hsieh
     given-names: Hong-Wen
-    # orcid: "https://orcid.org/0009-0008-1676-6170"  
+    orcid: "https://orcid.org/0009-0008-1676-6170"  
 license: Apache-2.0
 repository-code: "https://github.com/TCM-Dr-Hsieh/TCM-Meridian"   
 url: "https://github.com/TCM-Dr-Hsieh/TCM-Meridian"              
-version: "1.0.0"                # ← 對應你的第一個 GitHub Release tag
-date-released: "2026-06-18"  
+version: "1.0.0"
+date-released: "2026-06-18"
 keywords:
   - traditional chinese medicine
   - multi-agent system
@@ -26,9 +26,8 @@ keywords:
   - large language models
   - electronic medical records
   - AI safety
-# 取得 Zenodo DOI 後，取消下面註解並填入（同時可在 README 放 DOI badge）：
-# doi: "10.5281/zenodo.XXXXXXX"
-# identifiers:
-#   - type: doi
-#     value: "10.5281/zenodo.XXXXXXX"
-#     description: "Archived release on Zenodo"
+doi: "10.5281/zenodo.20725779"
+identifiers:
+  - type: doi
+    value: "10.5281/zenodo.20725779"
+    description: "Concept DOI (all versions) on Zenodo"

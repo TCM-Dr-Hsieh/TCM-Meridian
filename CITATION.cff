@@ -17,7 +17,7 @@ license: Apache-2.0
 repository-code: "https://github.com/TCM-Dr-Hsieh/TCM-Meridian"   
 url: "https://github.com/TCM-Dr-Hsieh/TCM-Meridian"              
 version: "1.0.0"
-date-released: "2026-06-18"
+date-released: "2026-06-17"
 keywords:
   - traditional chinese medicine
   - multi-agent system

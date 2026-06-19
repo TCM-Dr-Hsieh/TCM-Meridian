@@ -28,6 +28,27 @@ def _load_prompt(filename: str) -> str:
     return ""
 
 
+def _inside_bold_span(text: str, index: int) -> bool:
+    before = text[:index]
+    return before.count("**") % 2 == 1
+
+
+def _replace_first_unbolded(text: str, original: str, replacement: str) -> tuple[str, str]:
+    if not original:
+        return text, "not_found"
+
+    start = 0
+    found_in_bold = False
+    while True:
+        index = text.find(original, start)
+        if index < 0:
+            return text, "already_tagged" if found_in_bold else "not_found"
+        if not _inside_bold_span(text, index):
+            return text[:index] + replacement + text[index + len(original):], "replaced"
+        found_in_bold = True
+        start = index + len(original)
+
+
 # ════════════════════════════════════════════════════════════════
 # Low Confidence Subagent
 # ════════════════════════════════════════════════════════════════
@@ -104,6 +125,7 @@ class LowConfidenceSubagent:
         conversation_history: str = "",
         last_visit_block: str = "",
         history_summary: str = "",
+        record_diff_context: str = "",
         loaded_files_block: str = "",
         image_files: list | None = None,
         log_callback: Optional[Callable[[str], None]] = None,
@@ -213,6 +235,7 @@ class LowConfidenceSubagent:
                 round_num=lc_round,
                 already_tagged_summary=already_tagged_summary,
                 failed_phrases_summary=failed_phrases_summary,
+                record_diff_context=record_diff_context,
                 loaded_files_block=loaded_files_block,
                 behavior_context=behavior_context,
                 log_callback=log_callback,
@@ -223,44 +246,54 @@ class LowConfidenceSubagent:
 
             # 標註替換
             round_annotated = 0
+            replacement_results: dict[int, str] = {}
             for phrase_info in round_phrases:
                 original = phrase_info.get("original_phrase", "")
                 reason = phrase_info.get("reason", "")
-                if original and original in current_note:
+                replacement_status = "not_found"
+                if original:
                     annotated = f"**{original}（{reason}）**"
-                    current_note = current_note.replace(original, annotated, 1)
+                    current_note, replacement_status = _replace_first_unbolded(current_note, original, annotated)
+                if replacement_status == "replaced":
                     round_annotated += 1
+                replacement_results[id(phrase_info)] = replacement_status
 
             total_annotated += round_annotated
 
             # 收集片段紀錄
             for phrase_info in round_phrases:
                 orig = phrase_info.get("original_phrase", "")
+                replacement_status = replacement_results.get(id(phrase_info), "not_found")
                 all_phrases.append({
                     "round": lc_round,
                     "original_phrase": orig,
                     "reason": phrase_info.get("reason", ""),
-                    "matched": orig in current_note or f"**{orig}" in current_note,
+                    "matched": replacement_status in ("replaced", "already_tagged"),
+                    "replacement_status": replacement_status,
                 })
 
             # 更新摘要供下一輪使用
             if round_phrases:
                 success_phrases = [
                     p for p in round_phrases
-                    if (p.get("original_phrase", "") in current_note
-                        or f"**{p.get('original_phrase', '')}" in current_note)
+                    if replacement_results.get(id(p)) == "replaced"
+                ]
+                already_tagged_phrases = [
+                    p for p in round_phrases
+                    if replacement_results.get(id(p)) == "already_tagged"
                 ]
                 failed_phrases = [
                     p for p in round_phrases
-                    if not (p.get("original_phrase", "") in current_note
-                            or f"**{p.get('original_phrase', '')}" in current_note)
+                    if replacement_results.get(id(p)) == "not_found"
                 ]
 
-                if success_phrases:
-                    already_tagged_summary += f"\n[第 {lc_round} 輪標註]\n"
-                    for i, p in enumerate(success_phrases, 1):
+                handled_phrases = success_phrases + already_tagged_phrases
+                if handled_phrases:
+                    already_tagged_summary += f"\n[第 {lc_round} 輪已處理]\n"
+                    for i, p in enumerate(handled_phrases, 1):
+                        status_text = "已新增標註" if replacement_results.get(id(p)) == "replaced" else "已在標註區內，未重複標註"
                         already_tagged_summary += (
-                            f"  {i}. \"{p.get('original_phrase', '')}\" "
+                            f"  {i}. [{status_text}] \"{p.get('original_phrase', '')}\" "
                             f"→ {p.get('reason', '')}\n"
                         )
 
@@ -330,6 +363,7 @@ class LowConfidenceSubagent:
         round_num: int,
         already_tagged_summary: str,
         failed_phrases_summary: str,
+        record_diff_context: str = "",
         loaded_files_block: str = "",
         behavior_context: dict | None = None,
         log_callback: Optional[Callable[[str], None]] = None,
@@ -346,8 +380,11 @@ class LowConfidenceSubagent:
             print(msg)
 
         # 組裝 user prompt
+        record_diff_text = record_diff_context or "## 【病歷修改 diff 過程】\n（無病歷版本歷史）"
         user_prompt = f"""## 【最終正式病歷 NOTE 欄位】
 {current_note}
+
+{record_diff_text}
 
 ## 【人類醫師與 AI 主治醫師的互動過程】
 {conversation_history or '（無互動過程）'}
@@ -366,13 +403,13 @@ class LowConfidenceSubagent:
             if already_tagged_summary:
                 user_prompt += (
                     f"\n## 【先前各輪已標註的低信心片段（共 {round_num - 1} 輪，"
-                    f"以下片段已用 **...** 標註於 NOTE 中，不需重複標註）】\n"
+                    f"以下片段已用 **...** 標註於 NOTE 中，或已被判定落在既有標註區內，不需重複標註）】\n"
                     f"{already_tagged_summary}\n"
                 )
             if failed_phrases_summary:
                 user_prompt += (
                     f"\n## 【先前各輪曾識別但無法成功標註的低信心片段（"
-                    f"請重新擷取能精確匹配病歷原文的 original_phrase）】\n"
+                    f"這些片段未在未標註的 NOTE 原文中找到，請重新擷取能精確匹配病歷原文的 original_phrase）】\n"
                     f"{failed_phrases_summary}\n"
                 )
             user_prompt += (

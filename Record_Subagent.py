@@ -226,6 +226,7 @@ class RecordSubagent:
         last_visit_block: str = "",
         history_summary: str = "",
         interview_dialogue: str = "",
+        record_diff_context: str = "",
         forum_history: str = "",
         loaded_files_block: str = "",
         image_files: list | None = None,
@@ -315,9 +316,14 @@ class RecordSubagent:
 {loaded_files_block if loaded_files_block else '（空白）'}
 """
 
+        record_diff_text = record_diff_context or "## 【病歷修改 diff 過程】\n（無病歷版本歷史）"
+        record_diff_section = f"""
+{record_diff_text}
+"""
+
         user_prompt = f"""## 【指定更新欄位】
 {target_field}
-{conversation_section}{interview_section}{forum_section}{loaded_files_section}
+{conversation_section}{interview_section}{forum_section}{loaded_files_section}{record_diff_section}
 ## 【今日病歷(或當前編輯頁面的病歷) - {other_field_name}（參考用，不可修改）】
 {other_content if other_content else '（空白）'}
 
@@ -567,6 +573,7 @@ class RecordSubagent:
                 last_visit_block=last_visit_block,
                 history_summary=history_summary,
                 interview_dialogue=interview_dialogue,
+                record_diff_context=record_diff_context,
                 forum_history=forum_history,
                 loaded_files_block=loaded_files_block,
                 image_files=image_files,
@@ -663,7 +670,7 @@ class RecordSubagent:
 
 ## 【人類醫師與 AI 主治醫師的互動過程】
 {conversation_history or '（無）'}
-{interview_rewrite_section}{forum_rewrite_section}{loaded_files_rewrite_section}
+{interview_rewrite_section}{forum_rewrite_section}{loaded_files_rewrite_section}{record_diff_section}
 ## 【今日病歷(或當前編輯頁面的病歷) - {other_field_name}（參考用，不可修改）】
 {other_content if other_content else '（空白）'}
 

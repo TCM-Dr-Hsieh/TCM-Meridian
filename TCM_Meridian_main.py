@@ -196,6 +196,7 @@ load_history_summary = app_services.session_artifacts.load_history_summary
 save_forum_state = app_services.session_artifacts.save_forum_state
 load_forum_state = app_services.session_artifacts.load_forum_state
 save_conversation_file = app_services.session_artifacts.save_conversation_file
+record_snapshot_store = app_services.record_snapshots
 
 get_last_visit_content = app_services.history_context.get_last_visit_content
 generate_history_summary = app_services.history_context.generate_history_summary
@@ -402,6 +403,7 @@ def _build_medical_main_tab():
         save_forum_state=save_forum_state,
         load_forum_state=load_forum_state,
         save_conversation_file=save_conversation_file,
+        record_snapshot_store=record_snapshot_store,
         get_last_visit_content=get_last_visit_content,
         generate_history_summary=generate_history_summary,
     )

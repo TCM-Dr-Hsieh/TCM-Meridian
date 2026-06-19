@@ -3,6 +3,8 @@ from __future__ import annotations
 import difflib
 import re
 
+from record_edit_tags import tag_human_edits
+
 
 def simple_md_render(text: str) -> str:
     """Small markdown subset used by the existing NiceGUI HTML labels."""
@@ -41,24 +43,6 @@ def patient_info_html(basic_info: dict) -> str:
         f"性別: {basic_info.get('gender', '')} | 生日: {basic_info.get('birthday', '')}<br>"
         f"電話: {basic_info.get('phone', '')}"
     )
-
-
-def tag_human_edits(old_text: str, new_text: str) -> str:
-    tag = "[人類醫師_手動修改]"
-    old_lines = (old_text or "").split("\n")
-    new_lines = (new_text or "").split("\n")
-    result = []
-
-    matcher = difflib.SequenceMatcher(None, old_lines, new_lines, autojunk=False)
-    for op, _old_start, _old_end, new_start, new_end in matcher.get_opcodes():
-        changed = op != "equal"
-        for new_line in new_lines[new_start:new_end]:
-            stripped = new_line.strip()
-            if not changed or not stripped or tag in new_line:
-                result.append(new_line)
-            else:
-                result.append(new_line + tag)
-    return "\n".join(result)
 
 
 def build_conversation_text(messages: list[dict]) -> str:

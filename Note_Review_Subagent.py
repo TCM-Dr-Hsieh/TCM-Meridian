@@ -88,6 +88,7 @@ class NoteReviewSubagent:
         note_content: str,
         interview_dialogue: str = "",
         conversation_history: str = "",
+        record_diff_context: str = "",
         loaded_files_block: str = "",
         log_callback: Optional[Callable[[str], None]] = None,
         behavior_context: dict | None = None,
@@ -141,7 +142,10 @@ class NoteReviewSubagent:
         )
 
         # 組裝 user prompt
-        user_prompt = f"""## 【今日病歷(或當前編輯頁面的病歷) - NOTE】
+        record_diff_text = record_diff_context or "## 【病歷修改 diff 過程】\n（無病歷版本歷史）"
+        user_prompt = f"""{record_diff_text}
+
+## 【今日病歷(或當前編輯頁面的病歷) - NOTE】
 {note_content or '（空白）'}
 
 ## 【人類醫師與 AI 主治醫師的互動過程】

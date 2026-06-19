@@ -16,6 +16,7 @@ class MedicalRecordController:
         history: Any,
         refs: dict[str, Any],
         save_session_content: Callable[[str, str, str, str], None],
+        record_snapshot_store: Any,
         write_session_log: Callable[[str, str, str], None],
         busy_guard: Any | None = None,
     ):
@@ -24,6 +25,7 @@ class MedicalRecordController:
         self.history = history
         self.refs = refs
         self.save_session_content = save_session_content
+        self.record_snapshot_store = record_snapshot_store
         self.write_session_log = write_session_log
         self.busy_guard = busy_guard
 
@@ -92,6 +94,7 @@ class MedicalRecordController:
         current = self.history.get_current()
         if fp and dt and current:
             self.save_session_content(fp, dt, current["note"], current["at"])
+            self.record_snapshot_store.save_history(fp, dt, self.history)
             self.write_session_log(fp, dt, f"[SAVE] 版本 {self.history.current_index + 1} 已存檔")
 
     def on_browse(self):
@@ -146,7 +149,21 @@ class MedicalRecordController:
         new_at = tag_human_edits(current["at"], new_at)
 
         if new_note != current["note"] or new_at != current["at"]:
-            self.history.push(new_note, new_at, source="人類修改")
+            before_index = self.history.current_index
+            truncated = self.history.push(new_note, new_at, source="人類修改")
+            if truncated:
+                fp = self.app_state["selected_patient_folder"]
+                dt = self.app_state["selected_session_date"]
+                self.record_snapshot_store.append_audit_event(
+                    fp,
+                    dt,
+                    event_type="truncate_redo",
+                    source="人類修改",
+                    current_index_before=before_index,
+                    current_index_after=self.history.current_index,
+                    snapshots=truncated,
+                    note="Manual edit created a new linear version and replaced redo snapshots.",
+                )
             self.save_current_to_disk()
             fp = self.app_state["selected_patient_folder"]
             dt = self.app_state["selected_session_date"]

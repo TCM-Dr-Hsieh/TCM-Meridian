@@ -471,6 +471,8 @@ class AutoInterviewController:
         current = hist.get_current() if hist else None
         note_content = current["note"] if current else ""
         at_content = current["at"] if current else ""
+        record_history_snapshots = [dict(snap) for snap in getattr(hist, "snapshots", [])] if hist else []
+        record_history_current_index = getattr(hist, "current_index", -1) if hist else -1
 
         reply_text = f"問診助理啟動失敗，本輪已停止。原因：{reason}"
         interrupted_result = None
@@ -574,6 +576,8 @@ class AutoInterviewController:
         current = hist.get_current() if hist else None
         note_content = current["note"] if current else ""
         at_content = current["at"] if current else ""
+        record_history_snapshots = [dict(snap) for snap in getattr(hist, "snapshots", [])] if hist else []
+        record_history_current_index = getattr(hist, "current_index", -1) if hist else -1
 
         def log_cb(msg):
             self.write_session_log(fp, dt, msg)
@@ -600,6 +604,8 @@ class AutoInterviewController:
                     interview_summary=summary,
                     note_content=note_content,
                     at_content=at_content,
+                    record_history_snapshots=record_history_snapshots,
+                    record_history_current_index=record_history_current_index,
                     on_step=on_step,
                     log_callback=log_cb,
                 ),

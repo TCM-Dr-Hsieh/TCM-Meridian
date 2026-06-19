@@ -26,6 +26,7 @@ class MainAgentResultProcessor:
         save_chat_state: Callable[[str, str, list, dict | None], None],
         save_forum_state: Callable[[str, str, list[dict]], None],
         save_conversation_file: Callable[[str, str, str], None],
+        record_snapshot_store: Any,
     ):
         self.app_state = app_state
         self.ui_state = ui_state
@@ -42,6 +43,7 @@ class MainAgentResultProcessor:
         self.save_chat_state = save_chat_state
         self.save_forum_state = save_forum_state
         self.save_conversation_file = save_conversation_file
+        self.record_snapshot_store = record_snapshot_store
 
     async def process(self, result: dict, fp: str, dt: str, gen: int = -1):
         if gen >= 0 and not self.agent_run_state.is_current_generation(gen):
@@ -74,11 +76,13 @@ class MainAgentResultProcessor:
                 snapshot.get("note", ""),
                 snapshot.get("at", ""),
                 snapshot.get("source", f"Agent Turn {result.get('turn_number', '?')} update_record"),
+                fp,
+                dt,
             ):
                 pushed += 1
 
         final_source = f"Agent Turn {result.get('turn_number', '?')}"
-        if self._push_record_snapshot(result["note"], result["at"], final_source):
+        if self._push_record_snapshot(result["note"], result["at"], final_source, fp, dt):
             pushed += 1
 
         if pushed:
@@ -87,11 +91,23 @@ class MainAgentResultProcessor:
             self.update_buttons()
             self.write_session_log(fp, dt, f"[AGENT_UPDATE] Agent 更新病歷 (版本 {self.history.current_index + 1}，新增 {pushed} 個快照)")
 
-    def _push_record_snapshot(self, note: str, at: str, source: str) -> bool:
+    def _push_record_snapshot(self, note: str, at: str, source: str, fp: str, dt: str) -> bool:
         current = self.history.get_current()
         if current and current.get("note", "") == note and current.get("at", "") == at:
             return False
-        self.history.push(note, at, source=source)
+        before_index = self.history.current_index
+        truncated = self.history.push(note, at, source=source)
+        if truncated:
+            self.record_snapshot_store.append_audit_event(
+                fp,
+                dt,
+                event_type="truncate_redo",
+                source=source,
+                current_index_before=before_index,
+                current_index_after=self.history.current_index,
+                snapshots=truncated,
+                note="AI update created a new linear version and replaced redo snapshots.",
+            )
         return True
 
     async def _handle_waiting_for_interview(self, result: dict, fp: str, dt: str):

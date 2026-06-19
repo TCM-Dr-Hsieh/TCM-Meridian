@@ -46,6 +46,7 @@ def build_medical_main_tab(
     save_forum_state: Callable[[str, str, list[dict]], None],
     load_forum_state: Callable[[str, str], list[dict]],
     save_conversation_file: Callable[[str, str, str], None],
+    record_snapshot_store: Any,
     get_last_visit_content: Callable[[str, str], str],
     generate_history_summary: Callable[[str, str], str],
 ):
@@ -132,6 +133,7 @@ def build_medical_main_tab(
             "btn_redo": refs["btn_redo"],
         },
         save_session_content=save_session_content,
+        record_snapshot_store=record_snapshot_store,
         write_session_log=write_session_log,
         busy_guard=busy_guard,
     )
@@ -183,6 +185,7 @@ def build_medical_main_tab(
         delete_session=delete_session,
         write_session_log=write_session_log,
         load_config=load_config,
+        record_snapshot_store=record_snapshot_store,
         generate_history_summary=generate_history_summary,
         get_session_restorer=lambda: _get_session_restorer(),
         update_display=_update_display,
@@ -287,6 +290,7 @@ def build_medical_main_tab(
         save_chat_state=save_chat_state,
         save_forum_state=save_forum_state,
         save_conversation_file=save_conversation_file,
+        record_snapshot_store=record_snapshot_store,
     )
 
     async def on_send():

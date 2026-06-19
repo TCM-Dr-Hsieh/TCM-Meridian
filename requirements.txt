@@ -13,6 +13,7 @@ openai==1.98.0                   # OpenAI API 客戶端（用於 LLM 通訊）
 chromadb==1.0.15                 # 向量資料庫
 langchain==0.3.26                # LLM 應用框架
 langchain-community==0.3.27      # LangChain 社群整合（Chroma 等）
+sentence-transformers==5.0.0     # Embedding 模型（可選，若使用本地 embedding）
 
 # ============== 文字處理與檢索 ==============
 numpy==1.26.4                    # 數值計算

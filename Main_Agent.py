@@ -14,6 +14,7 @@ from typing import Any, Callable, Optional
 
 from openai import OpenAI
 from multimodal_utils import inject_images_into_messages
+from record_diff_context import build_record_diff_context
 from agent_behavior_log import append_behavior_event
 from deidentification_utils import format_patient_basic_info_for_llm
 
@@ -463,6 +464,8 @@ class MainAgent:
         last_visit_block: str = "",
         history_summary: str = "",
         interview_dialogue: str = "",
+        record_history_snapshots: list[dict[str, Any]] | None = None,
+        record_history_current_index: int | None = None,
         on_step: Optional[Callable[[dict], None]] = None,
         log_callback: Optional[Callable[[str], None]] = None,
     ) -> dict[str, Any]:
@@ -541,6 +544,8 @@ class MainAgent:
             last_visit_block=last_visit_block,
             history_summary=history_summary,
             interview_dialogue=interview_dialogue,
+            record_history_snapshots=record_history_snapshots,
+            record_history_current_index=record_history_current_index,
             steps=[],
             sub_turn_start=0,
             turn_num=turn_num,
@@ -557,6 +562,8 @@ class MainAgent:
         note_content: str,
         at_content: str,
         conversation_history: str = "",
+        record_history_snapshots: list[dict[str, Any]] | None = None,
+        record_history_current_index: int | None = None,
         on_step: Optional[Callable[[dict], None]] = None,
         log_callback: Optional[Callable[[str], None]] = None,
     ) -> dict[str, Any]:
@@ -613,6 +620,16 @@ class MainAgent:
             last_visit_block=s["last_visit_block"],
             history_summary=s["history_summary"],
             interview_dialogue=interview_dialogue,
+            record_history_snapshots=(
+                record_history_snapshots
+                if record_history_snapshots is not None
+                else s.get("record_history_snapshots")
+            ),
+            record_history_current_index=(
+                record_history_current_index
+                if record_history_current_index is not None
+                else s.get("record_history_current_index")
+            ),
             steps=steps,
             sub_turn_start=s["sub_turn"],
             turn_num=s["turn_num"],
@@ -626,6 +643,29 @@ class MainAgent:
     # 核心 ReAct 迴圈（process_message 和 continue_after_interview 共用）
     # ────────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _active_record_history(
+        snapshots: list[dict[str, Any]] | None,
+        current_index: int | None,
+        current_note: str,
+        current_at: str,
+    ) -> list[dict[str, Any]]:
+        valid_snapshots = [dict(snap) for snap in (snapshots or []) if isinstance(snap, dict)]
+        if valid_snapshots:
+            if current_index is None:
+                current_index = len(valid_snapshots) - 1
+            try:
+                current_index = int(current_index)
+            except (TypeError, ValueError):
+                current_index = len(valid_snapshots) - 1
+            current_index = max(0, min(current_index, len(valid_snapshots) - 1))
+            return valid_snapshots[: current_index + 1]
+        return [{
+            "note": current_note,
+            "at": current_at,
+            "source": "目前病歷",
+        }]
+
     def _run_react_loop(
         self,
         *,
@@ -638,6 +678,8 @@ class MainAgent:
         last_visit_block: str,
         history_summary: str,
         interview_dialogue: str,
+        record_history_snapshots: list[dict[str, Any]] | None,
+        record_history_current_index: int | None,
         steps: list[dict],
         sub_turn_start: int,
         turn_num: int,
@@ -657,6 +699,35 @@ class MainAgent:
         current_at = at_content
         sub_turn = sub_turn_start
         record_snapshots: list[dict[str, Any]] = []
+
+        base_record_history = self._active_record_history(
+            record_history_snapshots,
+            record_history_current_index,
+            current_note,
+            current_at,
+        )
+
+        def _current_record_diff_context() -> str:
+            prompt_snapshots = [dict(snap) for snap in base_record_history]
+            prompt_snapshots.extend(dict(snap) for snap in record_snapshots)
+            if not prompt_snapshots:
+                prompt_snapshots.append({
+                    "note": current_note,
+                    "at": current_at,
+                    "source": "目前病歷",
+                })
+            else:
+                last_snapshot = prompt_snapshots[-1]
+                if (
+                    last_snapshot.get("note", "") != current_note
+                    or last_snapshot.get("at", "") != current_at
+                ):
+                    prompt_snapshots.append({
+                        "note": current_note,
+                        "at": current_at,
+                        "source": "目前工作版本",
+                    })
+            return build_record_diff_context(prompt_snapshots)
 
         # 暴露 steps 引用供 UI polling
         self._live_steps = steps
@@ -719,6 +790,7 @@ class MainAgent:
                 session_date=session_date,
                 steps=steps,
                 interview_dialogue=interview_dialogue,
+                record_diff_context=_current_record_diff_context(),
             )
 
             _log(f"\n{'─'*40}")
@@ -893,6 +965,7 @@ class MainAgent:
                     last_visit_block=last_visit_block,
                     history_summary=history_summary,
                     interview_dialogue=interview_dialogue,
+                    record_diff_context=_current_record_diff_context(),
                     forum_history=self._format_forum_history(),
                     loaded_files_block=self._format_loaded_files_block(),
                     image_files=self._loaded_files,
@@ -986,6 +1059,8 @@ class MainAgent:
                     "conversation_history": conversation_history,
                     "last_visit_block": last_visit_block,
                     "history_summary": history_summary,
+                    "record_history_snapshots": record_history_snapshots,
+                    "record_history_current_index": record_history_current_index,
                     "original_note": original_note,
                     "original_at": original_at,
                 }
@@ -1029,6 +1104,7 @@ class MainAgent:
                         conversation_history=conversation_history,
                         last_visit_block=last_visit_block,
                         history_summary=history_summary,
+                        record_diff_context=_current_record_diff_context(),
                         loaded_files_block=self._format_loaded_files_block(),
                         image_files=self._loaded_files,
                         log_callback=log_callback,
@@ -1037,6 +1113,7 @@ class MainAgent:
                     if self._manual_stop_event.is_set():
                         return _manual_stop_result()
                     if lc_result["success"]:
+                        before_note = current_note
                         current_note = lc_result["annotated_note"]
                         if lc_result.get("skipped_control_group"):
                             step_record["result"] = "低信心標註未執行（檢測強度0/對照組），NOTE 未變更"
@@ -1045,6 +1122,14 @@ class MainAgent:
                                 f"完成低信心標註，共 {lc_result['total_rounds']} 輪，"
                                 f"標註 {lc_result['total_annotated']} 個片段"
                             )
+                            if current_note != before_note:
+                                record_snapshots.append({
+                                    "note": current_note,
+                                    "at": current_at,
+                                    "source": f"{step_label} low_confidence_check",
+                                    "target_field": "note",
+                                    "result": step_record["result"],
+                                })
                         _log(f"[Main Agent] LC: {step_record['result']}")
                     else:
                         step_record["result"] = (
@@ -1085,6 +1170,7 @@ class MainAgent:
                     note_content=current_note,
                     interview_dialogue=interview_dialogue,
                     conversation_history=conversation_history,
+                    record_diff_context=_current_record_diff_context(),
                     loaded_files_block=self._format_loaded_files_block(),
                     log_callback=log_callback,
                     behavior_context={"folder_path": self._patient_folder, "date_str": session_date},
@@ -1142,6 +1228,8 @@ class MainAgent:
                         "conversation_history": conversation_history,
                         "last_visit_block": last_visit_block,
                         "history_summary": history_summary,
+                        "record_history_snapshots": record_history_snapshots,
+                        "record_history_current_index": record_history_current_index,
                         "original_note": original_note,
                         "original_at": original_at,
                     }
@@ -1652,6 +1740,7 @@ class MainAgent:
         session_date: str,
         steps: list[dict],  # 本主輪的子輪步驟
         interview_dialogue: str = "",
+        record_diff_context: str = "",
     ) -> str:
         """建立包含完整上下文的 user prompt。"""
 
@@ -1741,6 +1830,8 @@ class MainAgent:
         forum_text = self._format_forum_history()
         parts.append(f"""## 【醫療問答討論區】
 {forum_text if forum_text else '（空白）'}""")
+
+        parts.append(record_diff_context or "## 【病歷修改 diff 過程】\n（無病歷版本歷史）")
 
         # 今日病歷（隨時變動區，放在後面避免破壞前面的 KV cache）
         parts.append(f"""## 【今日病歷(或當前編輯頁面的病歷) - NOTE】

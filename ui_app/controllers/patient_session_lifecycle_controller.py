@@ -32,6 +32,7 @@ class PatientSessionLifecycleController:
         delete_session: Callable[[str, str], str],
         write_session_log: Callable[[str, str, str], None],
         load_config: Callable[[], dict],
+        record_snapshot_store: Any,
         generate_history_summary: Callable[[str, str], str],
         get_session_restorer: Callable[[], Any],
         update_display: Callable[[], None],
@@ -57,6 +58,7 @@ class PatientSessionLifecycleController:
         self.delete_session = delete_session
         self.write_session_log = write_session_log
         self.load_config = load_config
+        self.record_snapshot_store = record_snapshot_store
         self.generate_history_summary = generate_history_summary
         self.get_session_restorer = get_session_restorer
         self.update_display = update_display
@@ -64,6 +66,7 @@ class PatientSessionLifecycleController:
         self.render_chat = render_chat
         self.agent_run_state = get_agent_run_state(app_state, ui_state)
         self.busy_guard = busy_guard
+        self.last_restore_result: dict[str, Any] = {}
 
     def _sync_busy_navigation(self):
         if self.busy_guard:
@@ -150,15 +153,24 @@ class PatientSessionLifecycleController:
         if info:
             self.refs["remark_area"].value = info.get("basic_info", {}).get("remark", "")
 
-        self.history.reset()
-        self.history.push(note_text, at_text, source="init")
+        restore_result = self.record_snapshot_store.restore_or_initialize(
+            folder_path=fp,
+            date_str=dt,
+            history=self.history,
+            note_text=note_text,
+            at_text=at_text,
+        )
+        self.last_restore_result = restore_result
 
         self.update_display()
         self.update_buttons()
         session_restorer = self.get_session_restorer()
         session_restorer.restore_main_chat_state(fp, dt)
         session_restorer.restore_interview_state(fp, dt)
-        self.refs["session_status"].text = f"已載入 {dt}"
+        status_text = f"已載入 {dt}"
+        if restore_result.get("external_state_added"):
+            status_text += "（偵測到外部檔案狀態，已新增版本）"
+        self.refs["session_status"].text = status_text
         session_restorer.restore_forum_state(fp, dt)
         behavior_render = self.app_state.get("render_agent_behavior")
         if behavior_render:
@@ -438,7 +450,10 @@ class PatientSessionLifecycleController:
         self.app_context.bump_session_generation()
         self.reset_main_agent_input_state()
         self.load_session_into_ui()
-        self.refs["session_status"].text = f"✅ 已載入就診日期：{dt}"
+        status_text = f"✅ 已載入就診日期：{dt}"
+        if self.last_restore_result.get("external_state_added"):
+            status_text += "（偵測到外部檔案狀態，已新增版本）"
+        self.refs["session_status"].text = status_text
 
     async def on_summary_exit_session(self):
         fp = self.app_state["selected_patient_folder"]

@@ -75,6 +75,7 @@ class HallucinationSubagent:
         last_visit_block: str = "",
         history_summary: str = "",
         interview_dialogue: str = "",
+        record_diff_context: str = "",
         forum_history: str = "",
         loaded_files_block: str = "",
         image_files: list | None = None,
@@ -129,10 +130,13 @@ class HallucinationSubagent:
 {loaded_files_block if loaded_files_block else '（空白）'}
 """
 
+        record_diff_text = record_diff_context or "## 【病歷修改 diff 過程】\n（無病歷版本歷史）"
+
         user_prompt = f"""## 【即將登載的病歷更新】
 欄位：{field}
 內容：
 {content}
+{record_diff_text}
 {conversation_section}{interview_section}{forum_section}{loaded_files_section}
 請根據以上資訊，進行幻覺與過度聲稱審查。輸出 JSON。"""
 

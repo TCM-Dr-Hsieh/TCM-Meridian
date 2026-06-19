@@ -43,6 +43,8 @@ class MainAgentTurnRunner:
         current = self.history.get_current()
         note_content = current["note"] if current else ""
         at_content = current["at"] if current else ""
+        record_history_snapshots = [dict(snap) for snap in getattr(self.history, "snapshots", [])]
+        record_history_current_index = getattr(self.history, "current_index", -1)
         patient_info = self.app_state.get("selected_patient_info")
 
         last_visit = self.get_last_visit_content(fp, dt)
@@ -80,6 +82,8 @@ class MainAgentTurnRunner:
                 last_visit_block=last_visit,
                 history_summary=hist_summary,
                 interview_dialogue=interview_dialogue,
+                record_history_snapshots=record_history_snapshots,
+                record_history_current_index=record_history_current_index,
                 on_step=on_step,
                 log_callback=log_cb,
             ),

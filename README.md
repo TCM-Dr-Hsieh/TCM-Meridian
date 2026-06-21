@@ -361,6 +361,8 @@ patient_data/<patient_id>_<birthday>_<name>/
 
 主 Agent 與 Record/幻覺/低信心/病歷檢查員 Subagent 的 prompt 都會收到一個純文字【病歷修改 diff 過程】區塊：依目前停留版本（`snapshots[:current_index+1]`，不含被 undo 掉的 redo 分支）逐版列出 NOTE/A&T 變化與版本來源（如 `init` → `人類修改` → `Turn 2-1 update_record` → `Turn 2-2 low_confidence_check`）。因此「哪一版由誰、在哪一步造成」改由 diff 來源呈現；系統不再對 AI 修改的行加任何行內標籤（僅人工修改仍標 `[人類醫師_手動修改]`，且同行不重複疊加）。
 
+手動修改病歷時，請盡量保留既有的來源標籤 `[ ... ]`，不要因改寫句子而刪除它們。這些標籤是後續幻覺審查、低信心標註、病歷版本 diff 與稽核追蹤的重要依據；若來源標籤被移除，系統較難追溯該句內容的資訊來源。
+
 若本輪更新 NOTE，prompt 要求最後回覆前執行 `low_confidence_check`，除非醫師明確禁止。若本輪撰寫 A&T，prompt 要求在定稿前完成安全性流程：有安全性檢查教授時，需呼叫該教授審查目前 A&T；安全性為低時必須修正後再審，安全性為中/高時需在 A&T 最上方加入對應安全性標示。若沒有安全性檢查教授，A&T 最上方必須標註 `##注意，此分析未經過安全性檢查。`，最終回覆也需提醒醫師。
 
 `update_record` 會由 Record Subagent 套用行級操作。所有操作的 `line` 都以模型看到的原始行號為準，程式會先整批驗證再一次重建內容；`insert` 行號大於文末時會被視為文末追加，`delete` / `replace` 行號超範圍、未知 op 或同一行重複 delete/replace 則會讓整批操作退回、病歷不寫入，並把具體原因顯示在步驟結果中。已設定幻覺審查模型時會進入 Hallucination Reviewer。審查通過需累積 `detection_strength` 次 agree（累積制，跨重寫版本計次）。審查採 **fail-closed**：若反覆重寫後仍達 `max_review_rounds` 上限未通過、迴圈耗盡仍未達門檻、或審查器服務異常（LLM/JSON 失敗），病歷**不寫入**、回傳原始 NOTE/A&T，`review_result` 標示為未通過或審查失敗，主 Agent 顯示失敗而非假成功（並依 prompt 規則不得宣稱已更新）。審查器服務異常時只呼叫一次即短路，不會反覆重寫燒 token。若 `detection_strength = 0`（研究對照組模式），則跳過審查直接放行並明確標示。

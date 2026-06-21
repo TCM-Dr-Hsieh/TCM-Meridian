@@ -33,17 +33,33 @@ def _inside_bold_span(text: str, index: int) -> bool:
     return before.count("**") % 2 == 1
 
 
+def _citation_tag_spans(text: str) -> list[tuple[int, int]]:
+    return [(m.start(), m.end()) for m in re.finditer(r"\[[^\]\n]*\]", text or "")]
+
+
+def _overlaps_citation_tag(text: str, start: int, end: int) -> bool:
+    return any(start < tag_end and end > tag_start for tag_start, tag_end in _citation_tag_spans(text))
+
+
 def _replace_first_unbolded(text: str, original: str, replacement: str) -> tuple[str, str]:
     if not original:
         return text, "not_found"
 
     start = 0
     found_in_bold = False
+    found_in_citation_tag = False
     while True:
         index = text.find(original, start)
         if index < 0:
+            if found_in_citation_tag:
+                return text, "citation_tag"
             return text, "already_tagged" if found_in_bold else "not_found"
         if not _inside_bold_span(text, index):
+            end = index + len(original)
+            if _overlaps_citation_tag(text, index, end):
+                found_in_citation_tag = True
+                start = end
+                continue
             return text[:index] + replacement + text[index + len(original):], "replaced"
         found_in_bold = True
         start = index + len(original)
@@ -217,6 +233,7 @@ class LowConfidenceSubagent:
         total_annotated = 0
         already_tagged_summary = ""
         failed_phrases_summary = ""
+        citation_tag_summary = ""
         lc_pass_count = 0
         lc_round = 0
 
@@ -235,6 +252,7 @@ class LowConfidenceSubagent:
                 round_num=lc_round,
                 already_tagged_summary=already_tagged_summary,
                 failed_phrases_summary=failed_phrases_summary,
+                citation_tag_summary=citation_tag_summary,
                 record_diff_context=record_diff_context,
                 loaded_files_block=loaded_files_block,
                 behavior_context=behavior_context,
@@ -286,6 +304,10 @@ class LowConfidenceSubagent:
                     p for p in round_phrases
                     if replacement_results.get(id(p)) == "not_found"
                 ]
+                citation_tag_phrases = [
+                    p for p in round_phrases
+                    if replacement_results.get(id(p)) == "citation_tag"
+                ]
 
                 handled_phrases = success_phrases + already_tagged_phrases
                 if handled_phrases:
@@ -300,6 +322,12 @@ class LowConfidenceSubagent:
                 if failed_phrases:
                     for p in failed_phrases:
                         failed_phrases_summary += (
+                            f"\"{p.get('original_phrase', '')}\" "
+                            f"→ {p.get('reason', '')}\n"
+                        )
+                if citation_tag_phrases:
+                    for p in citation_tag_phrases:
+                        citation_tag_summary += (
                             f"\"{p.get('original_phrase', '')}\" "
                             f"→ {p.get('reason', '')}\n"
                         )
@@ -363,6 +391,7 @@ class LowConfidenceSubagent:
         round_num: int,
         already_tagged_summary: str,
         failed_phrases_summary: str,
+        citation_tag_summary: str,
         record_diff_context: str = "",
         loaded_files_block: str = "",
         behavior_context: dict | None = None,
@@ -411,6 +440,13 @@ class LowConfidenceSubagent:
                     f"\n## 【先前各輪曾識別但無法成功標註的低信心片段（"
                     f"這些片段未在未標註的 NOTE 原文中找到，請重新擷取能精確匹配病歷原文的 original_phrase）】\n"
                     f"{failed_phrases_summary}\n"
+                )
+            if citation_tag_summary:
+                user_prompt += (
+                    f"\n## 【先前各輪曾識別但因 original_phrase 包含、跨越或落在來源標籤 [ ... ] 內而被拒絕標註的片段】\n"
+                    f"以下片段已被系統拒絕標註。請重新擷取不含來源標籤的病歷本文，"
+                    f"來源標籤本身必須完整保留在低信心標註區塊之外。\n"
+                    f"{citation_tag_summary}\n"
                 )
             user_prompt += (
                 "\n請檢查是否仍有遺漏的低信心片段。"

@@ -168,6 +168,17 @@ pip install -r requirements.txt
 
 目前程式碼會綁定 `0.0.0.0:8080`，並以 NiceGUI reload 模式啟動。
 
+## 教學影片
+
+- [教學影片 0](https://youtu.be/7lOB3Y6aApE)
+- [教學影片 1](https://youtu.be/GW9GIAgsyHw)
+- [教學影片 2](https://youtu.be/JAjywcu3ouY)
+- [教學影片 3](https://youtu.be/aFWUxiVllwc)
+- [教學影片 4](https://youtu.be/_MkE0rRfU5Y)
+- [教學影片 5](https://youtu.be/Mx_DoJ1WruI)
+- [教學影片 6](https://youtu.be/RmMTa5AmJC4)
+- [教學影片 7](https://youtu.be/NOhvOksdKeI)
+
 ## 設定檔
 
 `config.json` 包含主 Agent、各 Subagent 與教授 RAG 共用設定。首次使用請**複製 repo 內的 `config.example.json` 為 `config.json`** 再填入自己的 endpoint/key（`config.json` 已被 `.gitignore` 排除，不會進版控）。以下是結構範例與預設值示意；實際工作區的 `config.json` 可能已改成 OpenRouter、LM Studio 或其他 endpoint。設定檔讀取失敗時系統會在主控台印出 `WARNING` 並回落預設設定；儲存設定時使用原子寫入。

@@ -168,6 +168,17 @@ Main packages:
 
 The current application binds to `0.0.0.0:8080` and starts with NiceGUI reload mode enabled.
 
+## Tutorial Videos
+
+- [Tutorial 0](https://youtu.be/7lOB3Y6aApE)
+- [Tutorial 1](https://youtu.be/GW9GIAgsyHw)
+- [Tutorial 2](https://youtu.be/JAjywcu3ouY)
+- [Tutorial 3](https://youtu.be/aFWUxiVllwc)
+- [Tutorial 4](https://youtu.be/_MkE0rRfU5Y)
+- [Tutorial 5](https://youtu.be/Mx_DoJ1WruI)
+- [Tutorial 6](https://youtu.be/RmMTa5AmJC4)
+- [Tutorial 7](https://youtu.be/NOhvOksdKeI)
+
 ## Configuration
 
 `config.json` contains shared settings for the Main Agent, subagents, and Professor RAG. On first use, copy `config.example.json` to `config.json` and fill in your own endpoint/key. `config.json` is excluded by `.gitignore`. If configuration loading fails, the system prints a `WARNING` to the console and falls back to defaults; configuration saves use atomic writes.

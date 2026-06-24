@@ -16,11 +16,7 @@ authors:
 license: Apache-2.0
 repository-code: "https://github.com/TCM-Dr-Hsieh/TCM-Meridian"   
 url: "https://github.com/TCM-Dr-Hsieh/TCM-Meridian"              
-<<<<<<< HEAD
 version: "1.1.2"
-=======
-version: "1.1.1"
->>>>>>> b615d55bb1e2a615085978c0b2a58e5e64b69aab
 date-released: "2026-06-17"
 keywords:
   - traditional chinese medicine

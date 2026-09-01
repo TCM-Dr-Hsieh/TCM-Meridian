@@ -6,6 +6,77 @@ from typing import Any
 def build_medical_main_layout(ui: Any, today: str) -> dict[str, Any]:
     refs: dict[str, Any] = {}
 
+    ui.add_head_html(
+        """
+        <style>
+            .expanded-main-chat-scroll {
+                background: #f5f7f5;
+                overflow-y: auto;
+                padding: 24px;
+            }
+            .expanded-chat-user-bubble,
+            .expanded-chat-agent-bubble {
+                border-radius: 14px;
+                box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+                padding: 14px 18px;
+            }
+            .expanded-chat-user-bubble {
+                background: #e8f5e9;
+                max-width: 75%;
+            }
+            .expanded-chat-agent-bubble {
+                background: #ffffff;
+                border: 1px solid #e3e8e3;
+                max-width: 92%;
+            }
+            .expanded-main-chat-markdown {
+                font-size: 15px;
+                line-height: 1.75;
+                overflow-wrap: anywhere;
+                width: 100%;
+            }
+            .expanded-main-chat-markdown table {
+                border-collapse: collapse;
+                display: block;
+                margin: 12px 0;
+                max-width: 100%;
+                overflow-x: auto;
+                white-space: nowrap;
+                width: max-content;
+            }
+            .expanded-main-chat-markdown th,
+            .expanded-main-chat-markdown td {
+                border: 1px solid #cfd8cf;
+                padding: 8px 12px;
+                text-align: left;
+                vertical-align: top;
+                white-space: normal;
+            }
+            .expanded-main-chat-markdown th {
+                background: #e8f5e9;
+                color: #1b4332;
+                font-weight: 700;
+            }
+            .expanded-main-chat-markdown tbody tr:nth-child(even) {
+                background: #fafcfa;
+            }
+            .expanded-main-chat-markdown pre {
+                max-width: 100%;
+                overflow-x: auto;
+            }
+            @media (max-width: 700px) {
+                .expanded-main-chat-scroll {
+                    padding: 12px;
+                }
+                .expanded-chat-user-bubble,
+                .expanded-chat-agent-bubble {
+                    max-width: 100%;
+                }
+            }
+        </style>
+        """
+    )
+
     with ui.row().classes("w-full items-start gap-3").style("flex-wrap: nowrap; min-height: calc(100vh - 160px);"):
         with ui.column().classes("card-panel").style("width: 280px; min-width: 260px; flex-shrink: 0; padding: 16px;"):
             ui.label("🏥 病歷導覽").classes("section-title")
@@ -118,6 +189,12 @@ def build_medical_main_layout(ui: Any, today: str) -> dict[str, Any]:
                 "max-height: calc(100vh - 340px); overflow-y: auto; gap: 8px;"
             )
 
+            refs["btn_expand_chat"] = (
+                ui.button("對話放大", color="blue-grey", icon="open_in_full")
+                .props("dense outline no-caps")
+                .classes("w-full q-mt-xs")
+            )
+
             ui.separator().style("margin: 8px 0;")
 
             with ui.row().classes("w-full gap-2 items-end"):
@@ -135,5 +212,24 @@ def build_medical_main_layout(ui: Any, today: str) -> dict[str, Any]:
                 "background: #e3f2fd; border-radius: 8px; padding: 10px; gap: 4px;"
             )
             refs["live_steps_container"].set_visibility(False)
+
+    with ui.dialog().props("maximized transition-show=fade transition-hide=fade") as expanded_chat_dialog:
+        with ui.card().classes("w-full h-full q-pa-none").style(
+            "border-radius: 0; background: #f5f7f5; overflow: hidden; "
+            "display: flex; flex-direction: column;"
+        ):
+            with ui.row().classes("w-full items-center justify-between q-px-lg q-py-md").style(
+                "background: white; border-bottom: 1px solid #d8e4d8; flex-shrink: 0;"
+            ):
+                ui.label("💬 AI 主治醫師完整對話").style(
+                    "font-size: 20px; font-weight: 700; color: #1b4332;"
+                )
+                ui.button(icon="close", on_click=expanded_chat_dialog.close).props("flat round dense").tooltip("關閉")
+
+            refs["expanded_chat_container"] = ui.column().classes(
+                "w-full expanded-main-chat-scroll"
+            ).style("flex: 1 1 auto; min-height: 0; gap: 18px;")
+
+    refs["expanded_chat_dialog"] = expanded_chat_dialog
 
     return refs

@@ -9,7 +9,7 @@ from ui_app.controllers.interview_state_controller import get_interview_state
 from ui_app.controllers.main_agent_result_processor import MainAgentResultProcessor
 from ui_app.controllers.main_agent_turn_runner import MainAgentTurnRunner
 from ui_app.controllers.main_chat_input_controller import MainChatInputController
-from ui_app.controllers.main_chat_renderer import MainChatRenderer
+from ui_app.controllers.main_chat_renderer import ExpandedMainChatRenderer, MainChatRenderer
 from ui_app.controllers.medical_main_layout import build_medical_main_layout
 from ui_app.controllers.medical_record_controller import MedicalRecordController
 from ui_app.controllers.patient_session_lifecycle_controller import PatientSessionLifecycleController
@@ -83,8 +83,11 @@ def build_medical_main_tab(
     agent_input = refs["agent_input"]
     btn_send = refs["btn_send"]
     btn_stop_agent = refs["btn_stop_agent"]
+    btn_expand_chat = refs["btn_expand_chat"]
     agent_status = refs["agent_status"]
     chat_container = refs["chat_container"]
+    expanded_chat_dialog = refs["expanded_chat_dialog"]
+    expanded_chat_container = refs["expanded_chat_container"]
     live_steps_container = refs["live_steps_container"]
     agent_run_state = get_agent_run_state(app_state, ui_state)
     interview_state = get_interview_state(app_state)
@@ -257,6 +260,7 @@ def build_medical_main_tab(
 
     live_steps = LiveStepsController(ui, app_state, live_steps_container, agent_status)
     chat_renderer = MainChatRenderer(ui, chat_container)
+    expanded_chat_renderer = ExpandedMainChatRenderer(ui, expanded_chat_container)
     main_agent_runner = MainAgentTurnRunner(
         app_state=app_state,
         history=history,
@@ -271,6 +275,13 @@ def build_medical_main_tab(
 
     def _render_chat():
         chat_renderer.render(ui_state["chat_messages"])
+        if expanded_chat_dialog.value:
+            expanded_chat_renderer.render(ui_state["chat_messages"])
+
+    def on_expand_chat():
+        expanded_chat_renderer.render(ui_state["chat_messages"])
+        expanded_chat_dialog.open()
+        expanded_chat_renderer.scroll_to_bottom()
 
     app_state["_render_chat"] = _render_chat
 
@@ -420,5 +431,6 @@ def build_medical_main_tab(
 
     btn_send.on_click(on_send)
     btn_stop_agent.on_click(on_stop_agent)
+    btn_expand_chat.on_click(on_expand_chat)
     _refresh_patient_list()
     _update_buttons()

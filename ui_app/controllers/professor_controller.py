@@ -256,7 +256,7 @@ def build_professor_settings_tab(
         os.makedirs(os.path.join(new_dir, "doc"), exist_ok=True)
 
         template_dir = os.path.join(current_dir, "professor-Template")
-        for fname in ["prompt_system.txt", "prompt_3_prefix.txt", "prompt_query_expansion.txt", "prompt_rerank.txt"]:
+        for fname in ["prompt_system.txt", "prompt_3_prefix.txt", "prompt_rerank.txt"]:
             src = os.path.join(template_dir, fname)
             dst = os.path.join(new_dir, fname)
             if os.path.isfile(src):
@@ -279,11 +279,24 @@ def build_professor_settings_tab(
     ui.label("⚙️ 教授共用模型設定").style("font-size: 20px; font-weight: bold; margin-bottom: 8px;")
     ui.label("所有教授共用以下模型設定").style("color: #888; margin-bottom: 12px;")
 
+    max_rounds_input = ui.number(
+        "教授 ReAct Max Rounds",
+        value=prof_cfg.get("max_rounds", 15),
+        min=1,
+        max=50,
+        step=1,
+    ).classes("w-full")
+    max_retrievals_input = ui.number(
+        "教授每次回答最多檢索次數",
+        value=prof_cfg.get("max_retrievals_per_answer", 3),
+        min=0,
+        max=20,
+        step=1,
+    ).classes("w-full")
     model_inputs = {}
     model_sections = [
-        ("answer", "Answer LLM（教授回答用）"),
+        ("answer", "Answer LLM（教授 ReAct 思考與回答用）"),
         ("embedding", "Embedding Model（向量化 + 檢索用）"),
-        ("query_expansion", "Query Expansion LLM（查詢擴展用）"),
         ("prefix", "Prefix Classification LLM（三前綴分類用）"),
         ("rerank", "Rerank LLM（重排序用）"),
     ]
@@ -317,7 +330,10 @@ def build_professor_settings_tab(
         if _reject_if_busy():
             return
         current_cfg = load_config()
-        pc = {}
+        pc = {
+            "max_rounds": int(_read_number_or_default(max_rounds_input, 15)),
+            "max_retrievals_per_answer": int(_read_number_or_default(max_retrievals_input, 3)),
+        }
         for sk, _ in model_sections:
             inp = model_inputs[sk]
             pc[sk] = {
@@ -326,14 +342,16 @@ def build_professor_settings_tab(
                 "model_name": inp["model_name"].value.strip(),
             }
             if sk == "answer":
-                pc[sk]["max_tokens"] = int(inp["max_tokens"].value or 20000)
-                pc[sk]["temperature"] = float(inp["temperature"].value or 0.7)
+                pc[sk]["max_tokens"] = int(_read_number_or_default(inp["max_tokens"], 20000))
+                pc[sk]["temperature"] = float(_read_number_or_default(inp["temperature"], 0.7))
         current_cfg["professor_config"] = pc
         save_config(current_cfg)
         agent = agent_run_state.get_agent()
         if agent:
             agent.professor_config = pc
             agent._professor_instances.clear()
+            if hasattr(agent, "_professor_memory"):
+                agent._professor_memory.clear()
         ui.notify("✅ 教授模型設定已儲存", type="positive")
 
     _register_mutation_button(
@@ -342,3 +360,13 @@ def build_professor_settings_tab(
         .style("margin-top: 12px;")
     )
     _sync_mutation_state()
+
+
+def _read_number_or_default(control: Any, default: float | int) -> float | int:
+    """Read a numeric UI control while preserving explicit 0 / 0.0 values."""
+    raw = control.value
+    if raw is None:
+        return default
+    if isinstance(raw, str) and not raw.strip():
+        return default
+    return raw

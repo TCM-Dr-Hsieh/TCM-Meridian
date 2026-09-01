@@ -85,7 +85,7 @@ class MainAgent:
                 若為 None 則無法執行低信心標註。
             nr_config: 同上，給 Note Review Subagent 用。
                 若為 None 則無法執行病歷完整性掃描。
-            professor_config: 教授共用模型設定（answer/embedding/query_expansion/prefix/rerank）。
+            professor_config: 教授共用模型設定（max_rounds/answer/embedding/prefix/rerank）。
                 若為 None 則無法呼叫教授。
         """
         self.client = OpenAI(
@@ -127,6 +127,7 @@ class MainAgent:
         # 教授模組（惰性載入）
         self.professor_config = professor_config or {}
         self._professor_instances: dict[str, ProfessorInstance] = {}
+        self._professor_memory: dict[str, dict] = {}
 
         # 醫療問答討論區歷史
         self.forum_history: list[dict] = []
@@ -164,9 +165,7 @@ class MainAgent:
         professor_id: str,
         professor_name: str,
         question: str,
-        q_expand: str,
-        prefixes: list[str],
-        retr_doc: str,
+        retrieval_records: list[dict] | None,
         response: str,
     ):
         """將教授 RAG 完整行為寫入獨立 log 檔"""
@@ -181,26 +180,51 @@ class MainAgent:
 
         entry_lines = [
             separator,
-            f"[{timestamp}] 教授諮詢 RAG 紀錄  |  {professor_id} ({professor_name})",
+            f"[{timestamp}] 教授諮詢 ReAct/RAG 紀錄  |  {professor_id} ({professor_name})",
             separator,
             "",
             "## 【主 Agent 的提問】",
             question,
             "",
-            "## 【Query Expansion 擴展結果】",
-            q_expand,
-            "",
-            "## 【三前綴分類結果】",
-            ", ".join(prefixes) if prefixes else "（無）",
-            "",
-            "## 【RAG 檢索引入的資料庫原文】",
-            retr_doc if retr_doc else "（無檢索結果 / NoRAG）",
-            "",
+            "## 【本次 retrieve_knowledge 檢索紀錄】",
+        ]
+
+        records = retrieval_records or []
+        if not records:
+            entry_lines.extend([
+                "（本次未呼叫 retrieve_knowledge）",
+                "",
+            ])
+        else:
+            for idx, rec in enumerate(records, 1):
+                prefixes = rec.get("prefixes", [])
+                source_summary = rec.get("source_summary", [])
+                entry_lines.extend([
+                    f"### 檢索 {idx}（Round {rec.get('round', '?')}）",
+                    "",
+                    "#### Query",
+                    rec.get("query", "") or "（空白）",
+                    "",
+                    "#### 檢索狀態",
+                    rec.get("error") or "成功",
+                    "",
+                    "#### 三前綴分類結果",
+                    ", ".join(prefixes) if prefixes else "（無）",
+                    "",
+                    "#### 來源摘要",
+                    ", ".join(source_summary) if source_summary else "（無）",
+                    "",
+                    "#### RAG 檢索引入的資料庫原文",
+                    rec.get("retr_doc", "") or "（無檢索結果 / NoRAG）",
+                    "",
+                ])
+
+        entry_lines.extend([
             "## 【教授的回答】",
             response,
             "",
             "",
-        ]
+        ])
 
         with open(log_file, "a", encoding="utf-8") as f:
             f.write("\n".join(entry_lines))
@@ -209,6 +233,10 @@ class MainAgent:
 
     def export_state(self) -> dict:
         """匯出 Agent 內部狀態，供存檔使用"""
+        professor_memory = dict(self._professor_memory)
+        for prof_id, prof_inst in self._professor_instances.items():
+            if hasattr(prof_inst, "export_memory"):
+                professor_memory[prof_id] = prof_inst.export_memory()
         return {
             "turn_count": self.turn_count,
             "turn_history": self.turn_history,
@@ -218,6 +246,7 @@ class MainAgent:
             "_file_list_cache": self._file_list_cache,
             "_patient_folder": self._patient_folder,
             "_active_turn": self._active_turn,
+            "professor_memory": professor_memory,
         }
 
     def restore_state(self, state: dict):
@@ -230,6 +259,10 @@ class MainAgent:
         self._file_list_cache = state.get("_file_list_cache", None)
         self._patient_folder = state.get("_patient_folder", self._patient_folder)
         self._active_turn = state.get("_active_turn", None)
+        self._professor_memory = state.get("professor_memory", {}) if isinstance(state.get("professor_memory", {}), dict) else {}
+        for prof_id, prof_inst in self._professor_instances.items():
+            if prof_id in self._professor_memory and hasattr(prof_inst, "restore_memory"):
+                prof_inst.restore_memory(self._professor_memory.get(prof_id))
         self._manual_stop_event.clear()
         self._current_step_snapshot = None
         self._stop_snapshot = None
@@ -1319,6 +1352,8 @@ class MainAgent:
                             on_step(step_record)
                         continue
                     self._professor_instances[prof_id] = ProfessorInstance(prof_id, self.professor_config)
+                    if prof_id in self._professor_memory:
+                        self._professor_instances[prof_id].restore_memory(self._professor_memory.get(prof_id))
 
                 prof_inst = self._professor_instances[prof_id]
                 prof_display_name = prof_inst.name or prof_id
@@ -1331,7 +1366,7 @@ class MainAgent:
                 post_q_id = f"D{len(self.forum_history) + 1}"
                 post_a_id = f"D{len(self.forum_history) + 2}"
 
-                # 呼叫教授 RAG 管線
+                # 呼叫教授 ReAct 執行器
                 prof_result = prof_inst.answer(
                     question=prof_question,
                     note_content=current_note,
@@ -1341,22 +1376,37 @@ class MainAgent:
                     forum_history_text=forum_text,
                     loaded_files_block=self._format_loaded_files_block(),
                     image_files=self._loaded_files,
+                    patient_folder=self._patient_folder,
+                    manual_stop_event=self._manual_stop_event,
                     log_callback=log_callback,
-                    behavior_context={"folder_path": self._patient_folder, "date_str": session_date},
+                    behavior_context={
+                        "folder_path": self._patient_folder,
+                        "date_str": session_date,
+                        "turn": turn_num,
+                        "sub_turn": step_label,
+                    },
                 )
                 if self._manual_stop_event.is_set():
                     return _manual_stop_result()
 
                 prof_response = prof_result.get("response", "（無回應）")
+                prof_forced = bool(prof_result.get("forced", False))
+                if hasattr(prof_inst, "export_memory"):
+                    self._professor_memory[prof_id] = prof_inst.export_memory()
 
-                if prof_response.startswith("⚠️ 教授回答失敗") or prof_response.startswith("⚠️ 教授 Answer LLM 模型未設定"):
-                    step_record["result"] = f"call_professor: 教授 {prof_display_name} 回答失敗"
-                    _log(f"[Main Agent] 教授 {prof_display_name} 回答失敗，不寫入醫療問答討論區")
+                prof_error = prof_result.get("error")
+                if prof_error:
+                    step_record["result"] = f"call_professor: 教授 {prof_display_name} 回答失敗：{prof_error}"
+                    _log(f"[Main Agent] 教授 {prof_display_name} 回答失敗，不寫入醫療問答討論區：{prof_error}")
                     steps.append(step_record)
                     _mark_progress()
                     if on_step:
                         on_step(step_record)
                     continue
+
+                if prof_forced:
+                    forced_notice = "【系統提示：本回答為達教授 ReAct 輪數上限後強制整理，資訊可能不完整。】"
+                    prof_response = f"{forced_notice}\n\n{prof_response}"
 
                 # 教授回答完成後，將 Q/A 成對寫入 forum_history。
                 self.forum_history.append({
@@ -1377,6 +1427,7 @@ class MainAgent:
                 step_record["result"] = (
                     f"教授 {prof_display_name} 已回答 ({post_q_id}-{post_a_id})，"
                     f"回答長度 {len(prof_response)} 字"
+                    + ("，forced" if prof_forced else "")
                 )
                 step_record["professor_response"] = prof_response
                 step_record["professor_post_a_id"] = post_a_id
@@ -1391,9 +1442,7 @@ class MainAgent:
                     professor_id=prof_id,
                     professor_name=prof_display_name,
                     question=prof_question,
-                    q_expand=prof_result.get("q_expand", ""),
-                    prefixes=prof_result.get("prefixes", []),
-                    retr_doc=prof_result.get("retr_doc", ""),
+                    retrieval_records=prof_result.get("retrieval_records", []),
                     response=prof_response,
                 )
 
@@ -1951,6 +2000,7 @@ class MainAgent:
         self._suspended = None
         self.forum_history.clear()
         self._professor_instances.clear()
+        self._professor_memory.clear()
         self._file_list_cache = None
         self._loaded_files.clear()
         self._patient_folder = None

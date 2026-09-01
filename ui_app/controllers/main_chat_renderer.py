@@ -52,3 +52,55 @@ class MainChatRenderer:
 
             self.ui.label("🤖 醫療主Agent:").style("font-weight: 700; font-size: 13px; color: #555;")
             self.ui.html(f'<div class="chat-bubble-agent">{simple_md_render(msg["content"])}</div>')
+
+
+class ExpandedMainChatRenderer:
+    """Render a large, read-only transcript without Agent execution steps."""
+
+    def __init__(self, ui: Any, container: Any):
+        self.ui = ui
+        self.container = container
+
+    def render(self, messages: list[dict]):
+        self.container.clear()
+        with self.container:
+            conversation_messages = [
+                msg for msg in messages if msg.get("role") in {"user", "agent"}
+            ]
+            if not conversation_messages:
+                self.ui.label("尚無對話紀錄").style(
+                    "color: #999; font-size: 16px; margin: 48px auto;"
+                )
+                return
+
+            for msg in conversation_messages:
+                self._render_message(msg)
+
+    def scroll_to_bottom(self):
+        self.ui.run_javascript(
+            """
+            setTimeout(() => {
+              const el = document.querySelector('.expanded-main-chat-scroll');
+              if (el) el.scrollTop = el.scrollHeight;
+            }, 120);
+            """
+        )
+
+    def _render_message(self, msg: dict):
+        is_user = msg.get("role") == "user"
+        alignment = "items-end" if is_user else "items-start"
+        role_label = "👨‍⚕️ 人類醫師" if is_user else "🤖 AI 主治醫師"
+        role_color = "#2d6a4f" if is_user else "#555"
+        bubble_class = (
+            "expanded-chat-user-bubble" if is_user else "expanded-chat-agent-bubble"
+        )
+
+        with self.ui.column().classes(f"w-full {alignment}").style("gap: 5px;"):
+            self.ui.label(role_label).style(
+                f"font-weight: 700; font-size: 13px; color: {role_color};"
+            )
+            with self.ui.column().classes(bubble_class):
+                self.ui.markdown(
+                    msg.get("content", ""),
+                    extras=["fenced-code-blocks", "tables"],
+                ).classes("expanded-main-chat-markdown")

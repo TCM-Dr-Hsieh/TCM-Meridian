@@ -65,6 +65,8 @@ def build_agent_behavior_tab(ui: Any, app_state: dict[str, Any]):
             return "background:#dcfce7;color:#166534;border:1px solid #bbf7d0;"
         if event_type == "rag_retrieval":
             return "background:#f3e8ff;color:#6b21a8;border:1px solid #e9d5ff;"
+        if event_type.startswith("professor_"):
+            return "background:#ede9fe;color:#5b21b6;border:1px solid #ddd6fe;"
         return "background:#f3f4f6;color:#374151;border:1px solid #e5e7eb;"
 
     def render():

@@ -5,7 +5,7 @@
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20725779.svg)](https://doi.org/10.5281/zenodo.20725779)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-TCM-Meridian，中文名「杏林經緯」，是一套以 NiceGUI 建立的中醫診間 AI 工作台。它整合患者資料管理、就診病歷編輯、多模態患者檔案讀取、ReAct 主 Agent、多個安全與問診 Subagent，以及可追溯的教授 RAG 諮詢流程。
+TCM-Meridian，中文名「杏林經緯」，是一套以 NiceGUI 建立的中醫診間 AI 工作台。它整合患者資料管理、就診病歷編輯、多模態患者檔案讀取、ReAct 主 Agent、多個安全與問診 Subagent，以及可追溯的教授 ReAct/RAG 諮詢流程。
 
 本專案的定位是「醫師主導的臨床輔助系統」。AI 可以協助問診、更新病歷、檢查不確定性、諮詢知識庫並留下行為軌跡，但最終診斷、處方與處置仍必須由合格醫師決定。
 
@@ -31,9 +31,9 @@ TCM-Meridian，中文名「杏林經緯」，是一套以 NiceGUI 建立的中�
 ## 功能特色
 
 - **看診工作流**：檔案式患者與就診 Session 管理、三欄式工作台、病歷瀏覽/編輯與 Snapshot 版本控制（undo / redo / diff）。版本歷史會持久化到 session log 資料夾，同一就診日期退出再載入仍接續 diff/undo/redo，被覆蓋的版本與外部改檔狀態另存稽核。人工修改自動標記 `[人類醫師_手動修改]`（同行不重複疊加），就診日期附 50 字 NOTE 摘要索引。
-- **多智能體協作**：ReAct 主 Agent 以嚴格 JSON 契約協調病歷登載、幻覺審查、低信心標註、病歷檢查員、問診助理等 Subagent，並可諮詢教授 RAG（query expansion → 前綴分類 → 檢索 → RRF → rerank → 回答）、讀取患者影像與文字檔；全程記錄於「智能體互動行為」時間線。病歷的版本演化會以純文字「病歷修改 diff 過程」注入主 Agent 與相關 Subagent 的 prompt，讓它們看得到每一版由誰、在哪一步造成的改動。
-- **安全設計**：fail-closed 幻覺審查（未通過或服務異常即不寫入、不假成功）、行級登載整批驗證（全有全無）、來源歸因、合作式中斷、忙碌與全域設定鎖；另支援研究對照組模式（檢測強度設 `0` 即不檢查）。
-- **工程穩健**：重要檔原子寫入、Session 狀態保存與還原（聊天/問診/討論區/RAG trace/行為 log）、Main Agent 子模型可各設獨立 API 端點。
+- **多智能體協作**：ReAct 主 Agent 以嚴格 JSON 契約協調病歷登載、幻覺審查、低信心標註、病歷檢查員、問診助理等 Subagent，並可諮詢教授 ReAct/RAG subagent（教授自行提出檢索 query → 前綴分類 → 檢索 → RRF → rerank → 回答）、讀取患者影像與文字檔；全程記錄於「智能體互動行為」時間線。病歷的版本演化會以純文字「病歷修改 diff 過程」注入主 Agent 與相關 Subagent 的 prompt，讓它們看得到每一版由誰、在哪一步造成的改動。
+- **安全設計**：fail-closed 幻覺審查（未通過或服務異常即不寫入、不假成功）、fail-closed 教授諮詢（教授回傳錯誤即不寫入討論區，錯誤訊息不會被當成教授意見）、行級登載整批驗證（全有全無）、來源歸因、合作式中斷（含教授 ReAct 迴圈、檢索與 rerank）、忙碌與全域設定鎖；另支援研究對照組模式（幻覺／低信心檢測強度設 `0` 即不檢查，教授 `max_retrievals_per_answer` 設 `0` 即不查庫）。
+- **工程穩健**：重要檔原子寫入、Session 狀態保存與還原（聊天/問診/討論區/教授記憶/RAG trace/行為 log）、Main Agent 子模型可各設獨立 API 端點。
 
 ## 系統架構
 
@@ -121,7 +121,7 @@ Storage Layer
 
 - 建議 Python 3.10 以上。
 - 主 Agent 與 Subagent 需要 OpenAI-compatible chat API。
-- 教授 RAG 需要 OpenAI-compatible embedding endpoint。
+- 教授 ReAct/RAG 需要 OpenAI-compatible embedding endpoint。
 - 可搭配 LM Studio、OpenRouter 或其他相容服務。
 
 安裝依賴：
@@ -181,7 +181,7 @@ pip install -r requirements.txt
 
 ## 設定檔
 
-`config.json` 包含主 Agent、各 Subagent 與教授 RAG 共用設定。首次使用請**複製 repo 內的 `config.example.json` 為 `config.json`** 再填入自己的 endpoint/key（`config.json` 已被 `.gitignore` 排除，不會進版控）。以下是結構範例與預設值示意；實際工作區的 `config.json` 可能已改成 OpenRouter、LM Studio 或其他 endpoint。設定檔讀取失敗時系統會在主控台印出 `WARNING` 並回落預設設定；儲存設定時使用原子寫入。
+`config.json` 包含主 Agent、各 Subagent 與教授 ReAct/RAG 共用設定。首次使用請**複製 repo 內的 `config.example.json` 為 `config.json`** 再填入自己的 endpoint/key（`config.json` 已被 `.gitignore` 排除，不會進版控）。以下是結構範例與預設值示意；實際工作區的 `config.json` 可能已改成 OpenRouter、LM Studio 或其他 endpoint。設定檔讀取失敗時系統會在主控台印出 `WARNING` 並回落預設設定；儲存設定時使用原子寫入。
 
 ```json
 {
@@ -249,6 +249,8 @@ pip install -r requirements.txt
     "temperature": 1.0
   },
   "professor_config": {
+    "max_rounds": 15,
+    "max_retrievals_per_answer": 3,
     "answer": {
       "api_url": "http://localhost:1234/v1",
       "api_key": "lm-studio",
@@ -257,11 +259,6 @@ pip install -r requirements.txt
       "temperature": 0.7
     },
     "embedding": {
-      "api_url": "http://localhost:1234/v1",
-      "api_key": "lm-studio",
-      "model_name": ""
-    },
-    "query_expansion": {
       "api_url": "http://localhost:1234/v1",
       "api_key": "lm-studio",
       "model_name": ""
@@ -294,7 +291,9 @@ Main Agent 子模型 `main_agent.history_summary`（歷史病歷摘要/檢查）
 
 檢測強度（`hallucination_subagent.detection_strength`、`lc_subagent.detection_strength`）設為 `0` 代表研究對照組模式（不檢查直接放行）；`> 0` 時後端會 clamp 進 `[1, 對應最大輪次]`。模型設定頁會擋下留空、負值、以及檢測強度大於最大輪次的不合法組合。
 
-教授 RAG 另外分成回答模型、embedding、query expansion、三前綴分類與 rerank 模型。
+數值欄位的空值與 `0` 是分開處理的：「模型設定」與「教授設定」兩頁的 `max_tokens`、`temperature` 等欄位，只有**清空**才會回落預設值，明確填入的 `0` 會照實保存——因此 `temperature` 可以設為 `0`（決定性輸出，適合做可重現的研究對照）。
+
+教授 ReAct/RAG 另外分成回答模型、embedding、三前綴分類與 rerank 模型。`max_rounds` 控制每次教授諮詢最多 ReAct 輪數（預設 15），`max_retrievals_per_answer` 控制每次回答最多知識庫檢索次數（預設 3；設為 0 代表本次教授禁止查庫，只能用自身知識、討論區與患者檔案回答）。教授的完整 `react_history` 會跨 session 保存；若格式化後超過 5000 字，prompt 中只放最新 5000 字。若截斷後仍被模型回報 context overflow，教授回答會 fail-closed 回錯誤，不寫入討論區。
 
 ## UI 分頁
 
@@ -332,7 +331,7 @@ patient_data/<patient_id>_<birthday>_<name>/
         ├── <date>-forum.txt                            # 教授問答後由 save_forum_state 整檔重寫
         ├── <date>-Human-Agent-Interaction.md
         ├── <date>-History-Summary.md
-        ├── <date>-RAG-full-behavior.txt                # 教授 RAG 回答後產生/追加
+        ├── <date>-RAG-full-behavior.txt                # 教授回答後產生/追加，逐筆記錄本次 retrieve_knowledge
         ├── <date>-agent-behavior.jsonl                 # Agent 行為事件後產生/追加
         ├── <date>-record-snapshots.json                # 病歷版本歷史（首次載入該日期時建立）
         └── <date>-record-snapshot-events.jsonl         # 病歷版本稽核（覆蓋舊版本/外部改檔時追加）
@@ -380,7 +379,7 @@ patient_data/<patient_id>_<birthday>_<name>/
 
 `update_record` 會由 Record Subagent 套用行級操作。所有操作的 `line` 都以模型看到的原始行號為準，程式會先整批驗證再一次重建內容；`insert` 行號大於文末時會被視為文末追加，`delete` / `replace` 行號超範圍、未知 op 或同一行重複 delete/replace 則會讓整批操作退回、病歷不寫入，並把具體原因顯示在步驟結果中。已設定幻覺審查模型時會進入 Hallucination Reviewer。審查通過需累積 `detection_strength` 次 agree（累積制，跨重寫版本計次）。審查採 **fail-closed**：若反覆重寫後仍達 `max_review_rounds` 上限未通過、迴圈耗盡仍未達門檻、或審查器服務異常（LLM/JSON 失敗），病歷**不寫入**、回傳原始 NOTE/A&T，`review_result` 標示為未通過或審查失敗，主 Agent 顯示失敗而非假成功（並依 prompt 規則不得宣稱已更新）。審查器服務異常時只呼叫一次即短路，不會反覆重寫燒 token。若 `detection_strength = 0`（研究對照組模式），則跳過審查直接放行並明確標示。
 
-## 教授 RAG
+## 教授 ReAct/RAG
 
 每位教授是一個資料夾：
 
@@ -390,7 +389,6 @@ professor_XX/
 ├── doc/
 ├── prompt_system.txt
 ├── prompt_3_prefix.txt
-├── prompt_query_expansion.txt
 ├── prompt_rerank.txt
 ├── chroma_doc_index/    # 建立資料庫後產生（build artifact，不隨 repo 發布）
 └── parent_map.jsonl     # 建立資料庫後產生（build artifact，不隨 repo 發布）
@@ -405,7 +403,13 @@ professor_XX/
 }
 ```
 
-可在「教授設定」分頁新增教授、修改描述、檢查檔案、設定模型與建立 Chroma index。新增教授會從 `professor-Template/` 複製 prompt 模板。「建立資料庫」會在重建前先清除舊索引（避免 chunk 疊加重複），建立成功後清除主 Agent 對該教授的快取，使新索引立即生效；刪除教授與重建前會先釋放 Chroma 檔案控制代碼，避免 Windows 檔案占用錯誤。教授頁所有會改動全域狀態的操作（新增/儲存描述/建庫/刪除/儲存共用模型）都要求先退出患者（「檢查檔案」為 read-only 不受限）。
+可在「教授設定」分頁新增教授、修改描述、檢查檔案、設定模型與建立 Chroma index。新增教授會從 `professor-Template/` 複製 `prompt_system.txt`、`prompt_3_prefix.txt`、`prompt_rerank.txt` 三個 prompt 模板；舊版 `prompt_query_expansion.txt` 已不再複製，因為查詢擴展改由教授 ReAct 自行在 `retrieve_knowledge.query` 中完成。「建立資料庫」會在重建前先清除舊索引（避免 chunk 疊加重複），建立成功後清除主 Agent 對該教授的快取，使新索引立即生效；刪除教授與重建前會先釋放 Chroma 檔案控制代碼，避免 Windows 檔案占用錯誤。教授頁所有會改動全域狀態的操作（新增/儲存描述/建庫/刪除/儲存共用模型）都要求先退出患者（「檢查檔案」為 read-only 不受限）。
+
+教授 subagent 是多輪 ReAct agent。每輪只能輸出一個 JSON action，可使用 `retrieve_knowledge`、`update_graffiti_wall`、`list_patient_files`、`read_patient_file` 或 `reply_to_forum`。`reply_to_forum` 是正常結束條件；若達 `max_rounds`，系統會要求教授強制整理目前資訊回答，並在討論區標記「達輪數上限後強制整理」。手動中斷會合作式穿過 LLM 呼叫、檢索與 rerank，不會寫入討論區。
+
+`retrieve_knowledge` 的 `query` 由教授依當前思考自行產生，等同舊管線的 expanded query；後續仍保留三前綴分類、全庫/前綴雙路檢索、RRF、parent mapping 與 LLM rerank。知識庫檢索原文只活在本次 `answer()` 的 user prompt 最下方 `## 【知識庫檢索結果】`，新檢索會覆蓋當前已存在的結果；回答結束後不保存原文，長期 `react_history` 僅保存查詢紀錄與工具摘要。若有重要檢索結論需跨問答保留，教授可摘要寫入塗鴉牆並保留來源。
+
+`update_graffiti_wall` 只有 `append` 與 `summarize` 兩種模式。`append` 追加草稿；`summarize` 用教授已整理好的精簡新版覆蓋舊塗鴉牆。塗鴉牆會跨同一 Main Agent session 保留，user prompt 會在塗鴉牆區塊底部顯示字數；超過 8000 字時，教授 prompt 要求優先使用 `summarize` 壓縮整理。教授以 `list_patient_files` / `read_patient_file` 讀取的患者檔案只存在本次回答暫存區，若需要跨問答保留，也應摘要到塗鴉牆。
 
 ### 知識庫文件格式（`doc/`）
 

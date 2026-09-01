@@ -1,4 +1,4 @@
 {
   "name": "吳教授",
-  "description": "清代名醫吳謙的傳人。"
+  "description": "醫宗金鑑作者吳謙的傳人。"
 }

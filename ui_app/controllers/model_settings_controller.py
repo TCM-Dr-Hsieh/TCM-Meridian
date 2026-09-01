@@ -367,9 +367,24 @@ def read_agent_section(
         "api_url": inputs["api_url"].value or "",
         "api_key": inputs["api_key"].value or "",
         "model_name": inputs["model_name"].value or "",
-        "max_tokens": int(inputs["max_tokens"].value or defaults["max_tokens"]),
-        "temperature": float(inputs["temperature"].value or defaults["temperature"]),
+        "max_tokens": int(read_number_or_default(inputs["max_tokens"], defaults["max_tokens"])),
+        "temperature": float(read_number_or_default(inputs["temperature"], defaults["temperature"])),
     }
     for key in extra_keys or []:
-        data[key] = int(inputs[key].value or 0)
+        data[key] = int(read_number_or_default(inputs[key], 0))
     return data
+
+
+def read_number_or_default(control: Any, default: float | int) -> float | int:
+    """Read a numeric UI control while preserving explicit 0 / 0.0 values.
+
+    NiceGUI numeric inputs may yield None or an empty string when cleared. Those
+    should fall back to the provided default, but explicit 0 is a valid setting
+    (notably temperature=0.0 and detection_strength=0 control-group modes).
+    """
+    raw = control.value
+    if raw is None:
+        return default
+    if isinstance(raw, str) and not raw.strip():
+        return default
+    return raw

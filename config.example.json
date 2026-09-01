@@ -64,6 +64,8 @@
     "temperature": 1.0
   },
   "professor_config": {
+    "max_rounds": 15,
+    "max_retrievals_per_answer": 3,
     "answer": {
       "api_url": "https://openrouter.ai/api/v1",
       "api_key": "KEY",
@@ -75,11 +77,6 @@
       "api_url": "https://openrouter.ai/api/v1",
       "api_key": "KEY",
       "model_name": "qwen/qwen3-embedding-4b"
-    },
-    "query_expansion": {
-      "api_url": "https://openrouter.ai/api/v1",
-      "api_key": "KEY",
-      "model_name": "google/gemini-3-flash-preview"
     },
     "prefix": {
       "api_url": "https://openrouter.ai/api/v1",

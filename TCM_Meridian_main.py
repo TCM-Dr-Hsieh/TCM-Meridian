@@ -124,6 +124,8 @@ def _default_config() -> dict:
             "temperature": 1.0,
         },
         "professor_config": {
+            "max_rounds": 15,
+            "max_retrievals_per_answer": 3,
             "answer": {
                 "api_url": "http://localhost:1234/v1",
                 "api_key": "lm-studio",
@@ -132,11 +134,6 @@ def _default_config() -> dict:
                 "temperature": 0.7,
             },
             "embedding": {
-                "api_url": "http://localhost:1234/v1",
-                "api_key": "lm-studio",
-                "model_name": "",
-            },
-            "query_expansion": {
                 "api_url": "http://localhost:1234/v1",
                 "api_key": "lm-studio",
                 "model_name": "",

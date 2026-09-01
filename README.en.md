@@ -5,7 +5,7 @@
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20725779.svg)](https://doi.org/10.5281/zenodo.20725779)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-TCM-Meridian, also named Xinglin Jingwei, is a NiceGUI-based clinical AI workstation for Traditional Chinese Medicine. It integrates patient data management, visit-note editing, multimodal patient-file reading, a ReAct-style Main Agent, multiple safety and interview subagents, and a traceable Professor RAG consultation workflow.
+TCM-Meridian, also named Xinglin Jingwei, is a NiceGUI-based clinical AI workstation for Traditional Chinese Medicine. It integrates patient data management, visit-note editing, multimodal patient-file reading, a ReAct-style Main Agent, multiple safety and interview subagents, and a traceable Professor ReAct/RAG consultation workflow.
 
 The project is designed as a physician-led clinical support system. AI can help with interviewing, record updates, uncertainty checks, knowledge-base consultation, and behavior tracing, but final diagnosis, prescription, and treatment decisions must remain with a qualified clinician.
 
@@ -31,9 +31,9 @@ You may also use the **Cite this repository** button on the GitHub repository pa
 ## Features
 
 - **Clinical workflow**: file-based patient and visit-session management, a three-column workstation, record browsing/editing, and snapshot version control with undo / redo / diff. Version history is persisted in the session log folder, so diff/undo/redo continue after exiting and reloading the same visit date. Overwritten redo branches and external file states are kept as audit events. Human manual edits are marked with `[人類醫師_手動修改]` without duplicate stacking on the same line, and visit dates include a 50-character NOTE summary index.
-- **Multi-agent collaboration**: a ReAct-style Main Agent coordinates record registration, hallucination review, low-confidence annotation, note review, interview assistance, and Professor RAG through strict JSON contracts. Professor RAG follows query expansion -> prefix classification -> retrieval -> RRF -> rerank -> answer. The system can read patient images and text files, and records agent behavior in a timeline. Record-version evolution is injected into the Main Agent and relevant subagent prompts as a plain-text "medical record diff history", allowing agents to see which step caused each version change.
-- **Safety-oriented design**: fail-closed hallucination review, no write on review failure or service error, atomic line-level record operations with all-or-nothing validation, source attribution, cooperative interruption, busy-state locks, and global-setting locks. A research control mode is available by setting detection strength to `0`.
-- **Engineering robustness**: atomic writes for important files, session-state save/restore for chat/interview/forum/RAG traces/behavior logs, and independently configurable API endpoints for Main Agent submodels.
+- **Multi-agent collaboration**: a ReAct-style Main Agent coordinates record registration, hallucination review, low-confidence annotation, note review, interview assistance, and Professor ReAct/RAG subagents through strict JSON contracts. Each professor generates its own retrieval query -> prefix classification -> retrieval -> RRF -> rerank -> answer. The system can read patient images and text files, and records agent behavior in a timeline. Record-version evolution is injected into the Main Agent and relevant subagent prompts as a plain-text "medical record diff history", allowing agents to see which step caused each version change.
+- **Safety-oriented design**: fail-closed hallucination review, no write on review failure or service error; fail-closed professor consultation, where any error returned by the professor keeps the answer out of the forum so error text is never treated as professor opinion; atomic line-level record operations with all-or-nothing validation; source attribution; cooperative interruption that reaches into the professor ReAct loop, retrieval, and reranking; busy-state locks; and global-setting locks. Research control modes are available by setting hallucination/low-confidence detection strength to `0`, or the professor's `max_retrievals_per_answer` to `0` to disable knowledge-base retrieval.
+- **Engineering robustness**: atomic writes for important files, session-state save/restore for chat/interview/forum/professor memory/RAG traces/behavior logs, and independently configurable API endpoints for Main Agent submodels.
 
 ## Architecture
 
@@ -121,7 +121,7 @@ Storage Layer
 
 - Python 3.10 or later is recommended.
 - The Main Agent and subagents require an OpenAI-compatible chat API.
-- Professor RAG requires an OpenAI-compatible embedding endpoint.
+- Professor ReAct/RAG requires an OpenAI-compatible embedding endpoint.
 - LM Studio, OpenRouter, or other compatible services can be used.
 
 Install dependencies:
@@ -181,7 +181,7 @@ The current application binds to `0.0.0.0:8080` and starts with NiceGUI reload m
 
 ## Configuration
 
-`config.json` contains shared settings for the Main Agent, subagents, and Professor RAG. On first use, copy `config.example.json` to `config.json` and fill in your own endpoint/key. `config.json` is excluded by `.gitignore`. If configuration loading fails, the system prints a `WARNING` to the console and falls back to defaults; configuration saves use atomic writes.
+`config.json` contains shared settings for the Main Agent, subagents, and Professor ReAct/RAG. On first use, copy `config.example.json` to `config.json` and fill in your own endpoint/key. `config.json` is excluded by `.gitignore`. If configuration loading fails, the system prints a `WARNING` to the console and falls back to defaults; configuration saves use atomic writes.
 
 ```json
 {
@@ -249,6 +249,8 @@ The current application binds to `0.0.0.0:8080` and starts with NiceGUI reload m
     "temperature": 1.0
   },
   "professor_config": {
+    "max_rounds": 15,
+    "max_retrievals_per_answer": 3,
     "answer": {
       "api_url": "http://localhost:1234/v1",
       "api_key": "lm-studio",
@@ -257,11 +259,6 @@ The current application binds to `0.0.0.0:8080` and starts with NiceGUI reload m
       "temperature": 0.7
     },
     "embedding": {
-      "api_url": "http://localhost:1234/v1",
-      "api_key": "lm-studio",
-      "model_name": ""
-    },
-    "query_expansion": {
       "api_url": "http://localhost:1234/v1",
       "api_key": "lm-studio",
       "model_name": ""
@@ -288,7 +285,9 @@ The Main Agent submodels `main_agent.history_summary` and `main_agent.summary_ex
 
 Detection strengths (`hallucination_subagent.detection_strength`, `lc_subagent.detection_strength`) set to `0` enable research control mode, meaning the corresponding check is bypassed. Values greater than `0` are clamped to the valid range. The Model Settings page blocks empty values, negative values, and detection strengths larger than their maximum review/scan rounds.
 
-Professor RAG is configured separately for answer generation, embedding, query expansion, three-prefix classification, and reranking models.
+Blank fields and explicit `0` are handled differently: on the Model Settings and Professor Settings pages, numeric fields such as `max_tokens` and `temperature` fall back to their defaults only when **cleared**, while an explicitly entered `0` is saved as-is. `temperature` can therefore be set to `0` for deterministic, reproducible output.
+
+Professor ReAct/RAG is configured separately for answer generation, embedding, three-prefix classification, and reranking models. `max_rounds` controls the maximum ReAct rounds per professor consultation (default 15), and `max_retrievals_per_answer` controls the maximum knowledge-base retrieval calls per answer (default 3; `0` disables retrieval for that professor answer and forces the professor to use its own knowledge, forum context, and patient files). The full professor `react_history` is persisted across the session. If its formatted text exceeds 5000 characters, only the latest 5000 characters are inserted into the prompt. If the model still reports context overflow after truncation, the professor answer fails closed and is not written to the forum.
 
 ## UI Tabs
 
@@ -376,7 +375,7 @@ If the current turn updates NOTE, the prompt requires `low_confidence_check` bef
 
 When a hallucination-review model is configured, the Hallucination Reviewer runs before writing. Passing requires accumulating `detection_strength` agree results across review rounds and rewritten versions. The review is fail-closed: if review reaches `max_review_rounds`, the loop is exhausted, or the reviewer service fails, the record is not written, the original NOTE/A&T is returned, and `review_result` is marked as failed. The Main Agent must not claim that the update succeeded. If the reviewer service fails, the system short-circuits after one call instead of repeatedly rewriting and burning tokens. If `detection_strength = 0`, review is skipped as research control mode and explicitly marked as such.
 
-## Professor RAG
+## Professor ReAct/RAG
 
 Each professor is a folder:
 
@@ -386,7 +385,6 @@ professor_XX/
 ├── doc/
 ├── prompt_system.txt
 ├── prompt_3_prefix.txt
-├── prompt_query_expansion.txt
 ├── prompt_rerank.txt
 ├── chroma_doc_index/    # generated after database build; not distributed
 └── parent_map.jsonl     # generated after database build; not distributed
@@ -401,7 +399,13 @@ Suggested `Description.txt` format:
 }
 ```
 
-The Professor Settings tab can add professors, edit descriptions, check files, configure models, and build Chroma indexes. Adding a professor copies prompt templates from `professor-Template/`. "Build Database" clears old indexes before rebuilding, preventing duplicated chunks. After a successful build, the Main Agent cache for that professor is cleared so the new index takes effect immediately. On Windows, Chroma file handles are released before deletion or rebuild to avoid file-lock errors. Professor-page operations that change global state require exiting the current patient first; file checking is read-only and not restricted.
+The Professor Settings tab can add professors, edit descriptions, check files, configure models, and build Chroma indexes. Adding a professor copies `prompt_system.txt`, `prompt_3_prefix.txt`, and `prompt_rerank.txt` from `professor-Template/`. The legacy `prompt_query_expansion.txt` is no longer copied because query expansion is now performed by the professor itself through `retrieve_knowledge.query`. "Build Database" clears old indexes before rebuilding, preventing duplicated chunks. After a successful build, the Main Agent cache for that professor is cleared so the new index takes effect immediately. On Windows, Chroma file handles are released before deletion or rebuild to avoid file-lock errors. Professor-page operations that change global state require exiting the current patient first; file checking is read-only and not restricted.
+
+Each professor subagent is a multi-turn ReAct agent. Every round must emit one JSON action: `retrieve_knowledge`, `update_graffiti_wall`, `list_patient_files`, `read_patient_file`, or `reply_to_forum`. `reply_to_forum` is the normal terminal action. If `max_rounds` is reached, the system forces the professor to synthesize an answer from the currently available information and marks the forum post as a forced round-limit summary. Manual stop cooperatively propagates through LLM calls, retrieval, and reranking, and does not write to the forum.
+
+The `query` passed to `retrieve_knowledge` is generated by the professor during its reasoning loop and replaces the old separate query-expansion LLM step. The downstream retrieval quality pipeline is preserved: three-prefix classification, global/prefix dual retrieval, RRF, parent mapping, and LLM reranking. Raw retrieved passages live only in the current `answer()` call under the bottom `## 【知識庫檢索結果】` user-prompt section; each new retrieval overwrites the currently existing retrieval result, and no raw retrieval text is stored after the answer ends. Long-term `react_history` stores only queries and bounded tool summaries. Important retrieved conclusions that should persist across questions should be summarized into the graffiti wall with citations.
+
+`update_graffiti_wall` supports only `append` and `summarize`. `append` adds notes; `summarize` replaces the wall with a concise revised version already prepared by the professor. The graffiti wall persists across the same Main Agent session, and the user prompt shows its character count at the bottom of the wall section. When the wall exceeds 8000 characters, the professor prompt asks the professor to prefer `summarize`. Patient files read through `list_patient_files` / `read_patient_file` exist only in the current answer's temporary professor context; persistent patient-file insights should be summarized into the graffiti wall.
 
 ### Knowledge-Base File Format (`doc/`)
 

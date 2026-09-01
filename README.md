@@ -24,7 +24,7 @@ TCM-Meridian，中文名「杏林經緯」，是一套以 NiceGUI 建立的中�
 
 若你在研究或衍生工作中使用本專案，請引用：
 
-> Hsieh, H.-W. (2026). *TCM-Meridian (杏林經緯): A multi-agent, safety-oriented AI clinical assistant for Traditional Chinese Medicine* (v1.1.2). Zenodo. https://doi.org/10.5281/zenodo.20725779
+> Hsieh, H.-W. (2026). *TCM-Meridian (杏林經緯): A multi-agent, safety-oriented AI clinical assistant for Traditional Chinese Medicine* (v1.2.0). Zenodo. https://doi.org/10.5281/zenodo.20725779
 
 或點 GitHub repo 頁面右側的「**Cite this repository**」按鈕，自動取得 APA / BibTeX 格式（由 [`CITATION.cff`](CITATION.cff) 產生）。DOI `10.5281/zenodo.20725779` 為全版本（concept）DOI，永遠指向最新版本。
 

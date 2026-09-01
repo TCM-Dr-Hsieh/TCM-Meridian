@@ -24,7 +24,7 @@ Before public release or deployment, carefully check:
 
 If you use this project in research or derivative work, please cite:
 
-> Hsieh, H.-W. (2026). *TCM-Meridian (杏林經緯): A multi-agent, safety-oriented AI clinical assistant for Traditional Chinese Medicine* (v1.1.2). Zenodo. https://doi.org/10.5281/zenodo.20725779
+> Hsieh, H.-W. (2026). *TCM-Meridian (杏林經緯): A multi-agent, safety-oriented AI clinical assistant for Traditional Chinese Medicine* (v1.2.0). Zenodo. https://doi.org/10.5281/zenodo.20725779
 
 You may also use the **Cite this repository** button on the GitHub repository page to obtain APA or BibTeX metadata generated from [`CITATION.cff`](CITATION.cff). DOI `10.5281/zenodo.20725779` is the concept DOI and always points to the latest version.
 

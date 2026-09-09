@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import difflib
 import re
+from datetime import date
 
+from deidentification_utils import format_birthday_with_age
 from record_edit_tags import tag_human_edits
 
 
@@ -36,11 +38,15 @@ def strip_citations(text: str) -> str:
     return re.sub(r"\s*\[[^\]]*\]", "", text)
 
 
-def patient_info_html(basic_info: dict) -> str:
+def patient_info_html(basic_info: dict, reference_date: str | None = None) -> str:
+    birthday = format_birthday_with_age(
+        basic_info.get("birthday", ""),
+        reference_date or date.today().isoformat(),
+    )
     return (
         f"<b>{basic_info.get('name', '')}</b><br>"
         f"ID: {basic_info.get('id', '')}<br>"
-        f"性別: {basic_info.get('gender', '')} | 生日: {basic_info.get('birthday', '')}<br>"
+        f"性別: {basic_info.get('gender', '')} | 生日: {birthday}<br>"
         f"電話: {basic_info.get('phone', '')}"
     )
 

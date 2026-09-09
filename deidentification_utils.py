@@ -31,6 +31,19 @@ def _age_years_months_on_date(birthday: str, reference_date: str) -> tuple[int, 
     return years, months
 
 
+def format_birthday_with_age(birthday: str, reference_date: str) -> str:
+    """Keep the full birthday and append age in years and months when valid."""
+    birthday = (birthday or "").strip()
+    if not birthday:
+        return ""
+
+    age = _age_years_months_on_date(birthday, reference_date)
+    if age is None:
+        return birthday
+    years, months = age
+    return f"{birthday} ({years}歲{months}月)"
+
+
 def deidentify_birthday_with_age(birthday: str, reference_date: str) -> str:
     """Keep birth year and computed age, but mask month/day."""
     birthday = (birthday or "").strip()

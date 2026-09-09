@@ -114,7 +114,7 @@ Runtime prompts
 
 版面：
 
-- 左欄：患者選擇、session 選擇、新增 session、摘要並退出 session、患者備註。
+- 左欄：患者選擇、session 選擇、新增 session、摘要並退出 session、患者基本資料與備註。基本資料保留完整生日，並依系統當日以括號附加年齡，格式為 `YYYY-MM-DD (X歲Y月)`；生日空白、格式無效或晚於系統當日時不附加年齡。
 - Session 選擇下拉顯示 `YYYY-MM-DD（NOTE 摘要）`，但 value 維持 `YYYY-MM-DD`；新增 session 的「選擇模板」下拉維持純日期，不顯示摘要。
 - 中欄：NOTE 與 A&T 瀏覽、diff、修改模式、undo、redo。
 - 右欄：主 Agent 對話、「對話放大」、訊息輸入、送出、中斷、狀態與即時步驟。「對話放大」按鈕位於對話紀錄下方、訊息輸入區上方。
@@ -1036,7 +1036,7 @@ professor_*/parent_map.jsonl
 - 歷史摘要產生失敗（未設定模型/呼叫失敗）時，新增 session 的 UI 以 ⚠️ 明示失敗而非「已產生」。
 - 歷史病歷摘要/檢查與摘要並退出可各自設定獨立 API 端點與模型（`main_agent.history_summary` / `main_agent.summary_exit`），`model_name` 空白時沿用 Main Agent。
 - 標準病歷模板、模型設定、教授設定三頁的變更只能在無患者載入時進行，有患者時相關按鈕 disable。
-- 患者基本資料年齡顯示為 `X歲Y月`。
+- 左欄患者基本資料顯示完整生日並附加依系統當日計算的年齡（`YYYY-MM-DD (X歲Y月)`）；送入 LLM 的患者基本資料則遮蔽月/日並附加依就診日期計算的年齡（`YYYY-XX-XX (X歲Y月)`）。
 - 教授「建立資料庫」可重複執行而不疊加重複 chunk；建庫後可立即刪除教授而不發生檔案占用錯誤。
 - Main Agent 可完成 reply。
 - Main Agent 可透過 Record Subagent 更新 NOTE。

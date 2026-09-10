@@ -30,8 +30,12 @@ Thumbs.db
 professor_*/chroma_doc_index/
 professor_*/parent_map.jsonl
 
-# ── 注意：未來自建的教授若用到版權教材，請手動在此排除整個資料夾 ──
-# 例如：
+# ── 注意：自建的教授若用到版權教材，請手動在此排除整個資料夾 ──
+# professor_03/ 的 doc/ 為現行中醫教科書（十版／十一版）等受著作權保護的教材，
+# 屬作者本機私人知識庫，整個資料夾排除，不隨專案發布。
+professor_03/
+#
+# 未來新增同類教授時，請比照在此加入一行，例如：
 # professor_99/
 #
 # 目前附帶 professor_01（自編安全清單）、professor_02（醫宗金鑑，公眾領域古籍）

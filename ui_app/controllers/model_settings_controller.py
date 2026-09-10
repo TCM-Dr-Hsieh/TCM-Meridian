@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from main_agent_preferences import resolve_physician_preferences
 from ui_app.controllers.session_busy_guard import get_session_busy_guard
 
 
@@ -22,10 +23,11 @@ def build_model_settings_tab(
             "color: #666; font-size: 14px; margin-bottom: 16px;"
         )
 
+        main_cfg_initial = cfg.get("main_agent", {})
         main_inputs = build_agent_section(
             ui,
             "🤖 AI 主治醫師 (Main Agent)",
-            cfg.get("main_agent", {}),
+            main_cfg_initial,
             defaults={"max_tokens": 4000, "temperature": 0.7},
             extras=[
                 {
@@ -39,6 +41,25 @@ def build_model_settings_tab(
                 },
             ],
         )
+        initial_physician_preferences = resolve_physician_preferences(main_cfg_initial)
+        with ui.expansion("↳ 人類醫師的使用習慣（Main Agent）", icon="tune").classes("w-full q-mb-lg"):
+            ui.label(
+                "此內容會直接影響 Main Agent 的工具啟動時機、病歷定稿與安全檢查流程，修改後請實際測試。"
+            ).style("color: #b26a00; font-size: 13px; margin-bottom: 6px;")
+            physician_preferences_input = ui.textarea(
+                "長期使用習慣、偏好與工作方式",
+                value=initial_physician_preferences,
+            ).classes("w-full").props(
+                'outlined input-style="min-height: 320px; resize: vertical;"'
+            )
+            physician_preferences_count = ui.label(
+                f"目前字數：{len(initial_physician_preferences)} 字"
+            ).style("color: #888; font-size: 12px;")
+            physician_preferences_input.on_value_change(
+                lambda e, label=physician_preferences_count: label.set_text(
+                    f"目前字數：{len(str(e.value or ''))} 字"
+                )
+            )
         history_summary_inputs = build_agent_section(
             ui,
             "↳ 歷史病歷摘要/檢查（Main Agent 子模型）",
@@ -180,6 +201,7 @@ def build_model_settings_tab(
             new_cfg = load_config()
             main_cfg = dict(new_cfg.get("main_agent", {}))
             main_cfg.update(read_agent_section(main_inputs, {"max_tokens": 4000, "temperature": 0.7}, ["max_sub_turns"]))
+            main_cfg["physician_preferences"] = (physician_preferences_input.value or "").strip()
             history_summary_cfg = read_agent_section(
                 history_summary_inputs,
                 {"max_tokens": 4000, "temperature": 0.5},

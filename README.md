@@ -24,13 +24,14 @@ TCM-Meridian，中文名「杏林經緯」，是一套以 NiceGUI 建立的中�
 
 若你在研究或衍生工作中使用本專案，請引用：
 
-> Hsieh, H.-W. (2026). *TCM-Meridian (杏林經緯): A multi-agent, safety-oriented AI clinical assistant for Traditional Chinese Medicine* (v1.2.0). Zenodo. https://doi.org/10.5281/zenodo.20725779
+> Hsieh, H.-W. (2026). *TCM-Meridian (杏林經緯): A multi-agent, safety-oriented AI clinical assistant for Traditional Chinese Medicine* (v1.2.1). Zenodo. https://doi.org/10.5281/zenodo.20725779
 
 或點 GitHub repo 頁面右側的「**Cite this repository**」按鈕，自動取得 APA / BibTeX 格式（由 [`CITATION.cff`](CITATION.cff) 產生）。DOI `10.5281/zenodo.20725779` 為全版本（concept）DOI，永遠指向最新版本。
 
 ## 功能特色
 
 - **看診工作流**：檔案式患者與就診 Session 管理、三欄式工作台、病歷瀏覽/編輯與 Snapshot 版本控制（undo / redo / diff）。版本歷史會持久化到 session log 資料夾，同一就診日期退出再載入仍接續 diff/undo/redo，被覆蓋的版本與外部改檔狀態另存稽核。人工修改自動標記 `[人類醫師_手動修改]`（同行不重複疊加），就診日期附 50 字 NOTE 摘要索引。
+- **常用提示詞**：主介面右欄可建立、修改、刪除及匯入全域常用提示詞；匯入只會填入訊息草稿，不會自動送出或啟動 Main Agent。
 - **多智能體協作**：ReAct 主 Agent 以嚴格 JSON 契約協調病歷登載、幻覺審查、低信心標註、病歷檢查員、問診助理等 Subagent，並可諮詢教授 ReAct/RAG subagent（教授自行提出檢索 query → 前綴分類 → 檢索 → RRF → rerank → 回答）、讀取患者影像與文字檔；全程記錄於「智能體互動行為」時間線。病歷的版本演化會以純文字「病歷修改 diff 過程」注入主 Agent 與相關 Subagent 的 prompt，讓它們看得到每一版由誰、在哪一步造成的改動。
 - **安全設計**：fail-closed 幻覺審查（未通過或服務異常即不寫入、不假成功）、fail-closed 教授諮詢（教授回傳錯誤即不寫入討論區，錯誤訊息不會被當成教授意見）、行級登載整批驗證（全有全無）、來源歸因、合作式中斷（含教授 ReAct 迴圈、檢索與 rerank）、忙碌與全域設定鎖；另支援研究對照組模式（幻覺／低信心檢測強度設 `0` 即不檢查，教授 `max_retrievals_per_answer` 設 `0` 即不查庫）。
 - **工程穩健**：重要檔原子寫入、Session 狀態保存與還原（聊天/問診/討論區/教授記憶/RAG trace/行為 log）、Main Agent 子模型可各設獨立 API 端點。
@@ -54,6 +55,7 @@ Agent Layer
 
 Utility Layer
   deidentification_utils.py
+  main_agent_preferences.py
   record_edit_tags.py
   record_diff_context.py
   ui_app/services/llm_config_resolver.py
@@ -251,6 +253,8 @@ pip install -r requirements.txt
   "professor_config": {
     "max_rounds": 15,
     "max_retrievals_per_answer": 3,
+    "react_history_prompt_chars": 5000,
+    "graffiti_summarize_threshold": 8000,
     "answer": {
       "api_url": "http://localhost:1234/v1",
       "api_key": "lm-studio",
@@ -285,15 +289,15 @@ pip install -r requirements.txt
 - `max_tokens`
 - `temperature`
 
-程式也支援進階欄位，例如 `main_agent.max_sub_turns`、`main_agent.history_summary_review_rounds`、`hallucination_subagent.max_review_rounds`、`ic_subagent.max_collection_rounds`、`lc_subagent.max_scan_rounds` 與各檢查強度設定；其中多數可由模型設定頁調整，未寫入 `config.json` 時會使用程式預設值。
+程式也支援進階欄位，例如 `main_agent.physician_preferences`、`main_agent.max_sub_turns`、`main_agent.history_summary_review_rounds`、`hallucination_subagent.max_review_rounds`、`ic_subagent.max_collection_rounds`、`lc_subagent.max_scan_rounds` 與各檢查強度設定；其中多數可由模型設定頁調整，未寫入 `config.json` 時會使用程式預設值。`config.example.json` 已放入完整的預設 1～6 條 `physician_preferences`，可直接複製後修改；欄位缺少時仍會載入專案內建的同份習慣，欄位存在但為空字串時，則視為人類醫師刻意清空。
 
 Main Agent 子模型 `main_agent.history_summary`（歷史病歷摘要/檢查）與 `main_agent.summary_exit`（摘要並退出）為完整子設定 dict，可指向與 Main Agent 不同的 API 端點與模型；`model_name` 空白時依序 fallback 到 legacy 扁平鍵 `*_model_name`、再到 `main_agent.model_name`。`api_url` / `api_key` 空白時 fallback 到 Main Agent；`history_summary.max_tokens` 未設定時 fallback 到 Main Agent `max_tokens`，`summary_exit.max_tokens` 未設定時 fallback 到 `128`；temperature 分別 fallback 到 `0.5` 與 `0.2`。模型設定頁的子模型 `model_name` 不會自動預填 Main Agent 模型，避免把繼承模型誤固化成子模型專用模型。
 
 檢測強度（`hallucination_subagent.detection_strength`、`lc_subagent.detection_strength`）設為 `0` 代表研究對照組模式（不檢查直接放行）；`> 0` 時後端會 clamp 進 `[1, 對應最大輪次]`。模型設定頁會擋下留空、負值、以及檢測強度大於最大輪次的不合法組合。
 
-數值欄位的空值與 `0` 是分開處理的：「模型設定」與「教授設定」兩頁的 `max_tokens`、`temperature` 等欄位，只有**清空**才會回落預設值，明確填入的 `0` 會照實保存——因此 `temperature` 可以設為 `0`（決定性輸出，適合做可重現的研究對照）。
+數值欄位的空值與 `0` 是分開處理的：「模型設定」與「教授設定」兩頁只有在欄位**清空**時才會回落預設值。允許 `0` 的欄位會照實保存，例如 `temperature=0` 可用於決定性輸出；要求正數的 `max_rounds`、`react_history_prompt_chars` 與 `graffiti_summarize_threshold` 則至少為 1。
 
-教授 ReAct/RAG 另外分成回答模型、embedding、三前綴分類與 rerank 模型。`max_rounds` 控制每次教授諮詢最多 ReAct 輪數（預設 15），`max_retrievals_per_answer` 控制每次回答最多知識庫檢索次數（預設 3；設為 0 代表本次教授禁止查庫，只能用自身知識、討論區與患者檔案回答）。教授的完整 `react_history` 會跨 session 保存；若格式化後超過 5000 字，prompt 中只放最新 5000 字。若截斷後仍被模型回報 context overflow，教授回答會 fail-closed 回錯誤，不寫入討論區。
+教授 ReAct/RAG 另外分成回答模型、embedding、三前綴分類與 rerank 模型。`max_rounds` 控制每次教授諮詢最多 ReAct 輪數（預設 15），`max_retrievals_per_answer` 控制每次回答最多知識庫檢索次數（預設 3；設為 0 代表本次教授禁止查庫，只能用自身知識、討論區與患者檔案回答）。教授設定頁也可調整 `react_history_prompt_chars`（預設 5000；完整工作紀錄超過此值時，prompt 只放最新片段）與 `graffiti_summarize_threshold`（預設 8000；超過時提示教授優先整理塗鴉牆，但不自動截斷）。若截斷工作紀錄後仍被模型回報 context overflow，教授回答會 fail-closed 回錯誤，不寫入討論區。
 
 ## UI 分頁
 
@@ -309,6 +313,8 @@ Main Agent 子模型 `main_agent.history_summary`（歷史病歷摘要/檢查）
 8. 教授設定
 9. 標準病歷模板設定
 10. 智能體互動行為
+
+「醫療系統主介面」右欄訊息框上方提供 **常用提示詞** 按鈕。彈出視窗左側是提示詞清單，右側可編輯名稱與內容；內容框可垂直拉伸。匯入時只會將提示詞放入訊息框供人類醫師再次修改，不會直接送出。若訊息框已有草稿，可選擇取代、附加或取消。常用提示詞保存在 `config.json` 頂層的 `quick_prompts`，不綁定患者或 session，也不會注入 Main Agent context；請勿在其中保存患者個資。
 
 ## 患者資料格式
 
@@ -399,17 +405,18 @@ professor_XX/
 ```json
 {
   "name": "教授名稱",
-  "description": "教授專長與回答風格"
+  "description": "提供主 Agent 選擇教授的一句話簡介",
+  "role_style": "完整的教授角色設定與學術風格"
 }
 ```
 
-可在「教授設定」分頁新增教授、修改描述、檢查檔案、設定模型與建立 Chroma index。新增教授會從 `professor-Template/` 複製 `prompt_system.txt`、`prompt_3_prefix.txt`、`prompt_rerank.txt` 三個 prompt 模板；舊版 `prompt_query_expansion.txt` 已不再複製，因為查詢擴展改由教授 ReAct 自行在 `retrieve_knowledge.query` 中完成。「建立資料庫」會在重建前先清除舊索引（避免 chunk 疊加重複），建立成功後清除主 Agent 對該教授的快取，使新索引立即生效；刪除教授與重建前會先釋放 Chroma 檔案控制代碼，避免 Windows 檔案占用錯誤。教授頁所有會改動全域狀態的操作（新增/儲存描述/建庫/刪除/儲存共用模型）都要求先退出患者（「檢查檔案」為 read-only 不受限）。
+可在「教授設定」分頁新增教授、修改名稱與簡介、展開編輯完整的「教授角色設定與學術風格」、檢查檔案、設定模型與建立 Chroma index。`description` 只是供主 Agent 選擇教授的短簡介；`role_style` 會注入 `prompt_system.txt` 的 `{role_style}`。新增教授會從 `professor-Template/` 複製 `Description.txt`、`prompt_system.txt`、`prompt_3_prefix.txt` 與 `prompt_rerank.txt`；若 `Description.txt` 模板缺失，程式才建立含三個空欄位的合法 JSON fallback。舊版 `prompt_query_expansion.txt` 已不再複製，因為查詢擴展改由教授 ReAct 自行在 `retrieve_knowledge.query` 中完成。「建立資料庫」會在重建前先清除舊索引（避免 chunk 疊加重複），建立成功後清除主 Agent 對該教授的快取，使新索引立即生效；刪除教授與重建前會先釋放 Chroma 檔案控制代碼，避免 Windows 檔案占用錯誤。教授頁所有會改動全域狀態的操作（新增/儲存教授資料/建庫/刪除/儲存共用模型）都要求先退出患者（「檢查檔案」為 read-only 不受限）。
 
 教授 subagent 是多輪 ReAct agent。每輪只能輸出一個 JSON action，可使用 `retrieve_knowledge`、`update_graffiti_wall`、`list_patient_files`、`read_patient_file` 或 `reply_to_forum`。`reply_to_forum` 是正常結束條件；若達 `max_rounds`，系統會要求教授強制整理目前資訊回答，並在討論區標記「達輪數上限後強制整理」。手動中斷會合作式穿過 LLM 呼叫、檢索與 rerank，不會寫入討論區。
 
 `retrieve_knowledge` 的 `query` 由教授依當前思考自行產生，等同舊管線的 expanded query；後續仍保留三前綴分類、全庫/前綴雙路檢索、RRF、parent mapping 與 LLM rerank。知識庫檢索原文只活在本次 `answer()` 的 user prompt 最下方 `## 【知識庫檢索結果】`，新檢索會覆蓋當前已存在的結果；回答結束後不保存原文，長期 `react_history` 僅保存查詢紀錄與工具摘要。若有重要檢索結論需跨問答保留，教授可摘要寫入塗鴉牆並保留來源。
 
-`update_graffiti_wall` 只有 `append` 與 `summarize` 兩種模式。`append` 追加草稿；`summarize` 用教授已整理好的精簡新版覆蓋舊塗鴉牆。塗鴉牆會跨同一 Main Agent session 保留，user prompt 會在塗鴉牆區塊底部顯示字數；超過 8000 字時，教授 prompt 要求優先使用 `summarize` 壓縮整理。教授以 `list_patient_files` / `read_patient_file` 讀取的患者檔案只存在本次回答暫存區，若需要跨問答保留，也應摘要到塗鴉牆。
+`update_graffiti_wall` 只有 `append` 與 `summarize` 兩種模式。`append` 追加草稿；`summarize` 用教授已整理好的精簡新版覆蓋舊塗鴉牆。塗鴉牆會跨同一 Main Agent session 保留，user prompt 會在塗鴉牆區塊底部顯示字數；超過教授設定頁的 `graffiti_summarize_threshold` 時，教授 prompt 要求優先使用 `summarize` 壓縮整理。教授以 `list_patient_files` / `read_patient_file` 讀取的患者檔案只存在本次回答暫存區，若需要跨問答保留，也應摘要到塗鴉牆。
 
 ### 知識庫文件格式（`doc/`）
 
@@ -448,21 +455,19 @@ professor_XX/
 
 ## 角色設定
 
-系統的 Agent 行為大多由外置的 prompt 檔驅動，因此**不需要改動程式碼**，只要編輯對應的 prompt 區塊，就能調整 AI 的工作習慣與教授的學術風格。以下兩處最常用來客製化角色行為，建議都採「編輯 → 實測 → 觀察行為 → 再微調」的循環。
+系統的 Agent 行為由共用 prompt 契約與可編輯角色設定共同驅動。人類醫師的使用習慣與教授的學術風格都可直接從 UI 調整，不需要手動開啟 prompt 檔。建議採「編輯 → 實測 → 觀察行為 → 再微調」的循環。
 
 ### 1. 主 Agent 的工作習慣
 
-編輯 `prompt_main_agent.txt` 裡的 **`═══ 人類醫師的使用習慣 ═══`** 區塊，填入你個人或診所慣用的看診習慣與工作流程——例如：什麼情況下該主動問診、病歷要寫到多細、習慣先讀哪些檔案、何時諮詢教授等。
+到「模型設定」分頁，在 **AI 主治醫師 (Main Agent)** 下方展開「人類醫師的使用習慣」，填入你個人或診所慣用的看診習慣與工作流程——例如：什麼情況下該主動問診、病歷要寫到多細、習慣先讀哪些檔案、何時諮詢教授等。內容儲存在 `config.json` 的 `main_agent.physician_preferences`，並注入 `prompt_main_agent.txt` 的 `{physician_preferences}`。
 
 調整後，實際送幾則指令做測試，再到 **「智能體互動行為」分頁** 檢視主 Agent 的逐步決策，確認它的行為是否符合你設定的習慣；若不符合，回頭微調此區塊的描述再測一次。
 
 ### 2. 教授的學術風格
 
-每位教授的 `professor_XX/prompt_system.txt` 裡有一個 **`## 教授角色設定與學術風格`** 區塊，可填寫該教授的學術背景、擅長領域、論證取向與說話口吻——例如：經方派或時方派、用詞風格、回答時偏好引經據典或著重臨床實證等。
+到「教授設定」分頁展開每位教授的 **「教授角色設定與學術風格」**，可填寫該教授的學術背景、擅長領域、論證取向與說話口吻——例如：經方派或時方派、用詞風格、回答時偏好引經據典或著重臨床實證等。內容儲存在 `professor_XX/Description.txt` 的 `role_style` 欄位，並注入共用 `prompt_system.txt` 的 `{role_style}` 佔位符。
 
-填寫後，實際對該教授做幾輪問答測試，觀察其回答的風格與內容是否貼近你設定的人設；若不符合，回頭調整此區塊再測一次。
-
-> 提示：教授的「名稱」與一句話風格簡介另由 `professor_XX/Description.txt` 設定（會顯示在教授清單、並注入 prompt 的 `{description}` 佔位符）；`## 教授角色設定與學術風格` 則用來描述更完整的角色細節。
+填寫後，實際對該教授做幾輪問答測試，觀察其回答的風格與內容是否貼近你設定的人設；若不符合，回到設定頁調整後再測一次。`description` 仍只是顯示在教授清單、供主 Agent 選擇教授的一句話簡介，不應放入完整人設。
 
 ## 安全清單
 

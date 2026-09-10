@@ -64,6 +64,12 @@ def build_medical_main_layout(ui: Any, today: str) -> dict[str, Any]:
                 max-width: 100%;
                 overflow-x: auto;
             }
+            .quick-prompt-list-pane {
+                width: 280px;
+                min-width: 240px;
+                border-right: 1px solid #e2e8e2;
+                overflow-y: auto;
+            }
             @media (max-width: 700px) {
                 .expanded-main-chat-scroll {
                     padding: 12px;
@@ -71,6 +77,17 @@ def build_medical_main_layout(ui: Any, today: str) -> dict[str, Any]:
                 .expanded-chat-user-bubble,
                 .expanded-chat-agent-bubble {
                     max-width: 100%;
+                }
+                .quick-prompt-dialog-body {
+                    flex-direction: column;
+                    overflow-y: auto !important;
+                }
+                .quick-prompt-list-pane {
+                    width: 100%;
+                    min-width: 0;
+                    max-height: 190px;
+                    border-right: 0;
+                    border-bottom: 1px solid #e2e8e2;
                 }
             }
         </style>
@@ -196,6 +213,13 @@ def build_medical_main_layout(ui: Any, today: str) -> dict[str, Any]:
             )
 
             ui.separator().style("margin: 8px 0;")
+
+            refs["btn_quick_prompts"] = (
+                ui.button("常用提示詞", color="blue-grey", icon="bookmark")
+                .props("dense outline no-caps")
+                .classes("w-full")
+                .tooltip("建立、修改或匯入常用提示詞；匯入後不會自動送出")
+            )
 
             with ui.row().classes("w-full gap-2 items-end"):
                 refs["agent_input"] = ui.textarea(

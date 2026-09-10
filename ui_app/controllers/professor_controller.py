@@ -124,23 +124,49 @@ def build_professor_settings_tab(
             ui.label(f"🎓 {prof_id}").style("font-weight: bold; font-size: 16px; margin-bottom: 8px;")
             name_input = ui.input("教授名稱", value=prof.get("name", "")).classes("w-full")
             desc_input = ui.textarea("學術風格概述", value=prof.get("description", "")).classes("w-full")
+            with ui.expansion("教授角色設定與學術風格", icon="psychology").classes("w-full"):
+                ui.label(
+                    "可輸入完整的專長、辨證思路、學派、臨床分析習慣、回答格式與語氣要求。支援 Markdown。"
+                ).style("color: #888; font-size: 13px; margin-bottom: 6px;")
+                role_style_input = ui.textarea(
+                    "完整角色設定",
+                    value=prof.get("role_style", ""),
+                ).classes("w-full").props("autogrow")
+                role_style_count = ui.label(
+                    f"目前字數：{len(prof.get('role_style', '') or '')} 字"
+                ).style("color: #888; font-size: 12px;")
+                role_style_input.on_value_change(
+                    lambda e, label=role_style_count: label.set_text(
+                        f"目前字數：{len(str(e.value or ''))} 字"
+                    )
+                )
             status_label = ui.label("").style("margin-top: 8px; color: #666;")
 
             with ui.row().classes("gap-2 mt-2"):
 
-                def _save_desc(ni=name_input, di=desc_input, dp=desc_path, sl=status_label):
+                def _save_desc(
+                    ni=name_input,
+                    di=desc_input,
+                    rsi=role_style_input,
+                    dp=desc_path,
+                    sl=status_label,
+                ):
                     if _reject_if_patient_loaded(sl):
                         return
                     if _reject_if_busy(sl):
                         return
-                    data = {"name": ni.value.strip(), "description": di.value.strip()}
+                    data = {
+                        "name": (ni.value or "").strip(),
+                        "description": (di.value or "").strip(),
+                        "role_style": (rsi.value or "").strip(),
+                    }
                     os.makedirs(os.path.dirname(dp), exist_ok=True)
                     with open(dp, "w", encoding="utf-8") as f:
                         json.dump(data, f, ensure_ascii=False, indent=2)
-                    sl.set_text("✅ 描述已儲存")
+                    sl.set_text("✅ 教授資料已儲存")
                     _refresh_preview()
 
-                _register_mutation_button(ui.button("💾 儲存描述", on_click=_save_desc).props("dense"))
+                _register_mutation_button(ui.button("💾 儲存教授資料", on_click=_save_desc).props("dense"))
 
                 def _check_files(pid=prof_id, sl=status_label):
                     result = check_professor_files(pid)
@@ -265,8 +291,18 @@ def build_professor_settings_tab(
                 with open(dst, "w", encoding="utf-8") as f:
                     f.write("")
 
-        with open(os.path.join(new_dir, "Description.txt"), "w", encoding="utf-8") as f:
-            json.dump({"name": "", "description": ""}, f, ensure_ascii=False, indent=2)
+        description_src = os.path.join(template_dir, "Description.txt")
+        description_dst = os.path.join(new_dir, "Description.txt")
+        if os.path.isfile(description_src):
+            shutil.copy2(description_src, description_dst)
+        else:
+            with open(description_dst, "w", encoding="utf-8") as f:
+                json.dump(
+                    {"name": "", "description": "", "role_style": ""},
+                    f,
+                    ensure_ascii=False,
+                    indent=2,
+                )
         ui.notify(f"✅ 已新增 {new_id}", type="positive")
         _refresh_professor_cards()
         _refresh_preview()
@@ -293,6 +329,20 @@ def build_professor_settings_tab(
         max=20,
         step=1,
     ).classes("w-full")
+    react_history_prompt_chars_input = ui.number(
+        "ReAct 工作紀錄放入 Prompt 的字數上限",
+        value=prof_cfg.get("react_history_prompt_chars", 5000),
+        min=1,
+        max=1000000,
+        step=500,
+    ).classes("w-full").tooltip("完整工作紀錄仍會保存；超過此值時，教授 prompt 只放入最新片段。")
+    graffiti_summarize_threshold_input = ui.number(
+        "塗鴉牆整理門檻（字數）",
+        value=prof_cfg.get("graffiti_summarize_threshold", 8000),
+        min=1,
+        max=1000000,
+        step=500,
+    ).classes("w-full").tooltip("超過此門檻時提示教授優先使用 summarize；不會自動截斷塗鴉牆。")
     model_inputs = {}
     model_sections = [
         ("answer", "Answer LLM（教授 ReAct 思考與回答用）"),
@@ -331,8 +381,14 @@ def build_professor_settings_tab(
             return
         current_cfg = load_config()
         pc = {
-            "max_rounds": int(_read_number_or_default(max_rounds_input, 15)),
+            "max_rounds": max(1, int(_read_number_or_default(max_rounds_input, 15))),
             "max_retrievals_per_answer": int(_read_number_or_default(max_retrievals_input, 3)),
+            "react_history_prompt_chars": max(
+                1, int(_read_number_or_default(react_history_prompt_chars_input, 5000))
+            ),
+            "graffiti_summarize_threshold": max(
+                1, int(_read_number_or_default(graffiti_summarize_threshold_input, 8000))
+            ),
         }
         for sk, _ in model_sections:
             inp = model_inputs[sk]

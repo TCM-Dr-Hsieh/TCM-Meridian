@@ -1,4 +1,5 @@
 {
   "name": "",
-  "description": ""
+  "description": "",
+  "role_style": ""
 }

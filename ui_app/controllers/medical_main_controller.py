@@ -13,6 +13,7 @@ from ui_app.controllers.main_chat_renderer import ExpandedMainChatRenderer, Main
 from ui_app.controllers.medical_main_layout import build_medical_main_layout
 from ui_app.controllers.medical_record_controller import MedicalRecordController
 from ui_app.controllers.patient_session_lifecycle_controller import PatientSessionLifecycleController
+from ui_app.controllers.quick_prompt_controller import QuickPromptController
 from ui_app.controllers.session_busy_guard import get_session_busy_guard
 from ui_app.controllers.session_state_restorer import SessionStateRestorer
 from ui_app.rendering import build_conversation_text
@@ -26,6 +27,7 @@ def build_medical_main_tab(
     app_state: dict[str, Any],
     app_context: Any,
     load_config: Callable[[], dict],
+    save_config: Callable[[dict], None],
     agent_factory: Any,
     list_patients: Callable[[], list[dict]],
     load_patient: Callable[[str], dict | None],
@@ -81,6 +83,7 @@ def build_medical_main_tab(
     btn_undo = refs["btn_undo"]
     btn_redo = refs["btn_redo"]
     agent_input = refs["agent_input"]
+    btn_quick_prompts = refs["btn_quick_prompts"]
     btn_send = refs["btn_send"]
     btn_stop_agent = refs["btn_stop_agent"]
     btn_expand_chat = refs["btn_expand_chat"]
@@ -94,6 +97,14 @@ def build_medical_main_tab(
     busy_guard = get_session_busy_guard(app_state, ui_state)
     main_chat_input = MainChatInputController(app_state=app_state, btn_send=btn_send)
     app_state["_main_chat_input"] = main_chat_input
+    quick_prompt_controller = QuickPromptController(
+        ui=ui,
+        load_config=load_config,
+        save_config=save_config,
+        trigger_button=btn_quick_prompts,
+        agent_input=agent_input,
+    )
+    app_state["_quick_prompt_controller"] = quick_prompt_controller
     busy_guard.register_navigation_controls(
         [
             patient_select,

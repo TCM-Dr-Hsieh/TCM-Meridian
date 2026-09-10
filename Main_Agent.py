@@ -17,6 +17,7 @@ from multimodal_utils import inject_images_into_messages
 from record_diff_context import build_record_diff_context
 from agent_behavior_log import append_behavior_event
 from deidentification_utils import format_patient_basic_info_for_llm
+from main_agent_preferences import physician_preferences_prompt_text
 
 from Record_Subagent import RecordSubagent
 from Low_Confidence_Subagent import LowConfidenceSubagent
@@ -71,7 +72,8 @@ class MainAgent:
             main_config: {
                 "api_url": "http://localhost:1234/v1",
                 "api_key": "lm-studio",
-                "model_name": "model-name"
+                "model_name": "model-name",
+                "physician_preferences": "人類醫師長期使用習慣（選用）"
             }
             record_config: 同上，給 Record Subagent 用
             hallucination_config: 同上，給 Hallucination Subagent 用。
@@ -96,6 +98,7 @@ class MainAgent:
         self.max_tokens = int(main_config.get("max_tokens", 4000))
         self.temperature = float(main_config.get("temperature", 0.7))
         self.MAX_SUB_TURNS = int(main_config.get("max_sub_turns", 10))
+        self.physician_preferences = physician_preferences_prompt_text(main_config)
         self.system_prompt_template = _load_prompt("prompt_main_agent.txt")
 
         # 載入標準病歷模板
@@ -862,6 +865,8 @@ class MainAgent:
                 "{history_summary}", history_summary or "（無歷史病歷摘要）"
             ).replace(
                 "{professor_list}", prof_list_text
+            ).replace(
+                "{physician_preferences}", self.physician_preferences
             )
             messages = [
                 {"role": "system", "content": system_prompt},

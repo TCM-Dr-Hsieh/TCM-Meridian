@@ -44,9 +44,10 @@ EMB_NORMALIZE = True       # 是否 L2 正規化 embedding
 
 PROFESSOR_DEFAULT_MAX_ROUNDS = 15
 PROFESSOR_DEFAULT_MAX_RETRIEVALS_PER_ANSWER = 3
-PROFESSOR_REACT_HISTORY_FALLBACK_CHARS = 5000
-PROFESSOR_GRAFFITI_SUMMARIZE_THRESHOLD = 8000
+PROFESSOR_DEFAULT_REACT_HISTORY_PROMPT_CHARS = 5000
+PROFESSOR_DEFAULT_GRAFFITI_SUMMARIZE_THRESHOLD = 8000
 PROFESSOR_MAX_JSON_RETRIES = 3
+PROFESSOR_DEFAULT_ROLE_STYLE = "請維持資深中醫教授的客觀、嚴謹、臨床導向回答風格。"
 
 # 建立索引用的切塊參數
 CHUNK_SIZE = 400
@@ -198,6 +199,8 @@ class ProfessorInstance:
                 {
                     "max_rounds": 15,
                     "max_retrievals_per_answer": 3,
+                    "react_history_prompt_chars": 5000,
+                    "graffiti_summarize_threshold": 8000,
                     "answer": {"api_url", "api_key", "model_name", "max_tokens", "temperature"},
                     "embedding": {"api_url", "api_key", "model_name"},
                     "prefix": {"api_url", "api_key", "model_name"},
@@ -211,24 +214,31 @@ class ProfessorInstance:
         # 載入描述
         self.name = ""
         self.description_text = ""
+        self.role_style = ""
         desc_path = self.prof_dir / "Description.txt"
         if desc_path.exists():
             try:
                 desc = json.loads(desc_path.read_text(encoding="utf-8"))
                 self.name = desc.get("name", "")
                 self.description_text = desc.get("description", "")
+                self.role_style = desc.get("role_style", "")
             except Exception:
                 pass
 
         # 載入 prompt 檔案
         self.prompt_system = self._load_prompt("prompt_system.txt")
-        # 將 Description.txt 的教授名稱與描述注入 prompt_system
+        # 將 Description.txt 的教授名稱、簡介與角色風格注入 prompt_system
         professor_display_name = self.name or self.professor_id
         self.prompt_system = self.prompt_system.replace("{name}", professor_display_name)
         if self.description_text:
             self.prompt_system = self.prompt_system.replace("{description}", self.description_text)
         else:
             self.prompt_system = self.prompt_system.replace("{description}", "")
+        role_style = self.role_style.strip() if isinstance(self.role_style, str) else ""
+        self.prompt_system = self.prompt_system.replace(
+            "{role_style}",
+            role_style or PROFESSOR_DEFAULT_ROLE_STYLE,
+        )
         self.prompt_3_prefix = self._load_prompt("prompt_3_prefix.txt")
         self.prompt_rerank = self._load_prompt("prompt_rerank.txt")
 
@@ -239,6 +249,8 @@ class ProfessorInstance:
         self.last_context_overflow = False
         self.max_rounds = self._parse_max_rounds(config)
         self.max_retrievals_per_answer = self._parse_max_retrievals(config)
+        self.react_history_prompt_chars = self._parse_react_history_prompt_chars(config)
+        self.graffiti_summarize_threshold = self._parse_graffiti_summarize_threshold(config)
 
         # LLM clients（惰性建立）
         self._answer_client: Optional[OpenAI] = None
@@ -279,6 +291,31 @@ class ProfessorInstance:
         except Exception:
             value = PROFESSOR_DEFAULT_MAX_RETRIEVALS_PER_ANSWER
         return max(0, value)
+
+    def _parse_react_history_prompt_chars(self, config: dict) -> int:
+        return self._parse_positive_int_setting(
+            config,
+            "react_history_prompt_chars",
+            PROFESSOR_DEFAULT_REACT_HISTORY_PROMPT_CHARS,
+        )
+
+    def _parse_graffiti_summarize_threshold(self, config: dict) -> int:
+        return self._parse_positive_int_setting(
+            config,
+            "graffiti_summarize_threshold",
+            PROFESSOR_DEFAULT_GRAFFITI_SUMMARIZE_THRESHOLD,
+        )
+
+    @staticmethod
+    def _parse_positive_int_setting(config: dict, key: str, default: int) -> int:
+        try:
+            raw = config.get(key, default)
+            if raw is None or raw == "":
+                raw = default
+            value = int(raw)
+        except Exception:
+            value = default
+        return max(1, value)
 
     def export_memory(self) -> dict[str, Any]:
         return {
@@ -435,12 +472,16 @@ class ProfessorInstance:
 
         self.max_rounds = self._parse_max_rounds(self.config)
         self.max_retrievals_per_answer = self._parse_max_retrievals(self.config)
+        self.react_history_prompt_chars = self._parse_react_history_prompt_chars(self.config)
+        self.graffiti_summarize_threshold = self._parse_graffiti_summarize_threshold(self.config)
         self.last_react_history_truncated = False
         self.last_context_overflow = False
 
         _log(
             f"[Professor {self.professor_id}] 開始 ReAct 多輪處理提問"
-            f"（max_rounds={self.max_rounds}, max_retrievals={self.max_retrievals_per_answer}）..."
+            f"（max_rounds={self.max_rounds}, max_retrievals={self.max_retrievals_per_answer}, "
+            f"react_history_prompt_chars={self.react_history_prompt_chars}, "
+            f"graffiti_summarize_threshold={self.graffiti_summarize_threshold}）..."
         )
         self._behavior_event(
             behavior_context,
@@ -448,6 +489,12 @@ class ProfessorInstance:
             label="教授開始",
             title=f"{self.professor_id} ReAct 開始",
             content=question,
+            meta={
+                "max_rounds": self.max_rounds,
+                "max_retrievals_per_answer": self.max_retrievals_per_answer,
+                "react_history_prompt_chars": self.react_history_prompt_chars,
+                "graffiti_summarize_threshold": self.graffiti_summarize_threshold,
+            },
         )
 
         if not self.config.get("answer", {}).get("model_name", ""):
@@ -790,7 +837,7 @@ reply_to_forum 是唯一正常結束方式；若尚未足以回答，請使用�
         graffiti_block = self.graffiti_wall if self.graffiti_wall else "（空白）"
         graffiti_stats = (
             f"（塗鴉牆字數統計：{graffiti_char_count} 字；"
-            f"超過 {PROFESSOR_GRAFFITI_SUMMARIZE_THRESHOLD} 字時，"
+            f"超過 {self.graffiti_summarize_threshold} 字時，"
             "請優先使用 update_graffiti_wall 的 summarize 模式精簡整理。）"
         )
 
@@ -808,7 +855,7 @@ reply_to_forum 是唯一正常結束方式；若尚未足以回答，請使用�
         if overflow_notice:
             overflow_text = (
                 "完整 react_history 超過系統設定上限；"
-                f"本輪僅放入最新 {PROFESSOR_REACT_HISTORY_FALLBACK_CHARS} 字。"
+                f"本輪僅放入最新 {self.react_history_prompt_chars} 字。"
             )
             parts.append(
                 f"## 【系統提示】\n{overflow_text}"
@@ -956,8 +1003,8 @@ reply_to_forum 是唯一正常結束方式；若尚未足以回答，請使用�
         )
 
     def _react_history_prompt_limit(self, react_history_chars: int) -> int | None:
-        if react_history_chars > PROFESSOR_REACT_HISTORY_FALLBACK_CHARS:
-            return PROFESSOR_REACT_HISTORY_FALLBACK_CHARS
+        if react_history_chars > self.react_history_prompt_chars:
+            return self.react_history_prompt_chars
         return None
 
     def _log_react_history_truncated(
@@ -972,7 +1019,7 @@ reply_to_forum 是唯一正常結束方式；若尚未足以回答，請使用�
         meta.update({
             "reason": "react_history_chars_exceeded",
             "react_history_chars": react_history_chars,
-            "react_history_prompt_chars": PROFESSOR_REACT_HISTORY_FALLBACK_CHARS,
+            "react_history_prompt_chars": self.react_history_prompt_chars,
         })
         self._behavior_event(
             behavior_context,
@@ -981,7 +1028,7 @@ reply_to_forum 是唯一正常結束方式；若尚未足以回答，請使用�
             title=f"{self.professor_id} {round_label} react_history 截斷",
             content=(
                 f"react_history 已達 {react_history_chars} 字，"
-                f"本輪 prompt 僅放入最新 {PROFESSOR_REACT_HISTORY_FALLBACK_CHARS} 字。"
+                f"本輪 prompt 僅放入最新 {self.react_history_prompt_chars} 字。"
             ),
             severity="normal",
             meta=meta,
@@ -999,7 +1046,7 @@ reply_to_forum 是唯一正常結束方式；若尚未足以回答，請使用�
     ) -> dict[str, Any]:
         self.last_context_overflow = True
         error_msg = (
-            "教授 Answer LLM context overflow：react_history 已按 5000 字上限截斷，"
+            f"教授 Answer LLM context overflow：react_history 已按 {self.react_history_prompt_chars} 字上限截斷，"
             "但本輪 prompt 仍超過模型可接受大小。請減少討論區/讀檔/圖片內容後重試。"
         )
         meta = dict(round_meta or {})
@@ -1402,7 +1449,7 @@ reply_to_forum 是唯一正常結束方式；若尚未足以回答，請使用�
         observation = (
             f"update_graffiti_wall: 已以 {mode_key} 模式更新塗鴉牆"
             f"（目前 {len(self.graffiti_wall)} 字；"
-            f"超過 {PROFESSOR_GRAFFITI_SUMMARIZE_THRESHOLD} 字時請使用 summarize 精簡整理）。"
+            f"超過 {self.graffiti_summarize_threshold} 字時請使用 summarize 精簡整理）。"
         )
         self._behavior_event(
             behavior_context,
@@ -1512,7 +1559,7 @@ reply_to_forum 是唯一正常結束方式；若尚未足以回答，請使用�
         if context_overflow:
             self.last_context_overflow = True
             error_msg = (
-                "教授 Answer LLM context overflow：react_history 已按 5000 字上限截斷，"
+                f"教授 Answer LLM context overflow：react_history 已按 {self.react_history_prompt_chars} 字上限截斷，"
                 "但強制回覆 prompt 仍超過模型可接受大小。請減少討論區/讀檔/圖片內容後重試。"
             )
             meta = {
@@ -2055,7 +2102,7 @@ def load_all_professors() -> List[dict]:
     掃描專案資料夾下所有 professor_xx 目錄，回傳教授清單。
 
     Returns:
-        [{"id": "professor_01", "name": "學院派教授", "description": "..."}]
+        [{"id": "professor_01", "name": "學院派教授", "description": "...", "role_style": "..."}]
     """
     result = []
     for d in sorted(_PROJECT_DIR.glob("professor_*")):
@@ -2065,17 +2112,20 @@ def load_all_professors() -> List[dict]:
         desc_path = d / "Description.txt"
         name = ""
         description = ""
+        role_style = ""
         if desc_path.exists():
             try:
                 desc = json.loads(desc_path.read_text(encoding="utf-8"))
                 name = desc.get("name", "")
                 description = desc.get("description", "")
+                role_style = desc.get("role_style", "")
             except Exception:
                 pass
         result.append({
             "id": prof_id,
             "name": name,
             "description": description,
+            "role_style": role_style,
         })
     return result
 

@@ -24,7 +24,7 @@ Before public release or deployment, carefully check:
 
 If you use this project in research or derivative work, please cite:
 
-> Hsieh, H.-W. (2026). *TCM-Meridian (杏林經緯): A multi-agent, safety-oriented AI clinical assistant for Traditional Chinese Medicine* (v1.2.0). Zenodo. https://doi.org/10.5281/zenodo.20725779
+> Hsieh, H.-W. (2026). *TCM-Meridian (杏林經緯): A multi-agent, safety-oriented AI clinical assistant for Traditional Chinese Medicine* (v1.2.1). Zenodo. https://doi.org/10.5281/zenodo.20725779
 
 You may also use the **Cite this repository** button on the GitHub repository page to obtain APA or BibTeX metadata generated from [`CITATION.cff`](CITATION.cff). DOI `10.5281/zenodo.20725779` is the concept DOI and always points to the latest version.
 
@@ -54,6 +54,7 @@ Agent Layer
 
 Utility Layer
   deidentification_utils.py
+  main_agent_preferences.py
   record_edit_tags.py
   record_diff_context.py
   ui_app/services/llm_config_resolver.py
@@ -251,6 +252,8 @@ The current application binds to `0.0.0.0:8080` and starts with NiceGUI reload m
   "professor_config": {
     "max_rounds": 15,
     "max_retrievals_per_answer": 3,
+    "react_history_prompt_chars": 5000,
+    "graffiti_summarize_threshold": 8000,
     "answer": {
       "api_url": "http://localhost:1234/v1",
       "api_key": "lm-studio",
@@ -279,15 +282,15 @@ The current application binds to `0.0.0.0:8080` and starts with NiceGUI reload m
 
 Common fields include `api_url`, `api_key`, `model_name`, `max_tokens`, and `temperature`.
 
-Advanced fields include `main_agent.max_sub_turns`, `main_agent.history_summary_review_rounds`, `hallucination_subagent.max_review_rounds`, `ic_subagent.max_collection_rounds`, `lc_subagent.max_scan_rounds`, and detection-strength settings. Most of these can be adjusted from the Model Settings page. Missing values fall back to program defaults.
+Advanced fields include `main_agent.physician_preferences`, `main_agent.max_sub_turns`, `main_agent.history_summary_review_rounds`, `hallucination_subagent.max_review_rounds`, `ic_subagent.max_collection_rounds`, `lc_subagent.max_scan_rounds`, and detection-strength settings. Most of these can be adjusted from the Model Settings page. `config.example.json` includes the complete default habits 1–6 for direct copying and customization. If `physician_preferences` is missing, the same six built-in habits are used; an explicitly stored empty string means the physician intentionally cleared the section.
 
 The Main Agent submodels `main_agent.history_summary` and `main_agent.summary_exit` are full configuration dictionaries and may point to different API endpoints and models from the Main Agent. Empty `model_name` values fall back to legacy flat keys and then to `main_agent.model_name`. Empty `api_url` / `api_key` values fall back to the Main Agent. If `history_summary.max_tokens` is not set, it falls back to the Main Agent `max_tokens`; `summary_exit.max_tokens` defaults to `128`; temperatures default to `0.5` and `0.2` respectively. The Model Settings page does not automatically prefill submodel `model_name` fields with the Main Agent model, preventing inherited models from being accidentally persisted as dedicated submodel settings.
 
 Detection strengths (`hallucination_subagent.detection_strength`, `lc_subagent.detection_strength`) set to `0` enable research control mode, meaning the corresponding check is bypassed. Values greater than `0` are clamped to the valid range. The Model Settings page blocks empty values, negative values, and detection strengths larger than their maximum review/scan rounds.
 
-Blank fields and explicit `0` are handled differently: on the Model Settings and Professor Settings pages, numeric fields such as `max_tokens` and `temperature` fall back to their defaults only when **cleared**, while an explicitly entered `0` is saved as-is. `temperature` can therefore be set to `0` for deterministic, reproducible output.
+Blank fields and explicit `0` are handled separately: numeric fields on the Model Settings and Professor Settings pages fall back to defaults only when **cleared**. Fields that allow `0` preserve it, such as `temperature=0` for deterministic output; positive-only fields including `max_rounds`, `react_history_prompt_chars`, and `graffiti_summarize_threshold` are clamped to at least 1.
 
-Professor ReAct/RAG is configured separately for answer generation, embedding, three-prefix classification, and reranking models. `max_rounds` controls the maximum ReAct rounds per professor consultation (default 15), and `max_retrievals_per_answer` controls the maximum knowledge-base retrieval calls per answer (default 3; `0` disables retrieval for that professor answer and forces the professor to use its own knowledge, forum context, and patient files). The full professor `react_history` is persisted across the session. If its formatted text exceeds 5000 characters, only the latest 5000 characters are inserted into the prompt. If the model still reports context overflow after truncation, the professor answer fails closed and is not written to the forum.
+Professor ReAct/RAG is configured separately for answer generation, embedding, three-prefix classification, and reranking models. `max_rounds` controls the maximum ReAct rounds per professor consultation (default 15), and `max_retrievals_per_answer` controls the maximum knowledge-base retrieval calls per answer (default 3; `0` disables retrieval for that professor answer and forces the professor to use its own knowledge, forum context, and patient files). The Professor Settings page also exposes `react_history_prompt_chars` (default 5000; when the complete work history exceeds this value, only its latest segment is inserted into the prompt) and `graffiti_summarize_threshold` (default 8000; exceeding it asks the professor to summarize the graffiti wall but does not automatically truncate it). If the model still reports context overflow after work-history truncation, the professor answer fails closed and is not written to the forum.
 
 ## UI Tabs
 
@@ -303,6 +306,8 @@ The application currently has 10 top-level tabs:
 8. Professor Settings
 9. Standard Record Template Settings
 10. Agent Behavior Timeline
+
+The right side of the **Medical System Main Interface** provides a **Quick Prompts** button above the message box. Its dialog lists prompts on the left and provides a vertically resizable name/content editor on the right. Importing only places text into the physician's message draft for further editing; it never sends the message or starts the Main Agent. If a draft already exists, the physician can replace it, append the prompt, or cancel. Quick prompts are stored globally in the top-level `quick_prompts` field of `config.json`; they are not tied to a patient/session and are not injected into the Main Agent context. Do not store patient-identifying information in them.
 
 ## Patient Data Format
 
@@ -395,17 +400,18 @@ Suggested `Description.txt` format:
 ```json
 {
   "name": "Professor name",
-  "description": "Professor expertise and answer style"
+  "description": "One-line summary used by the Main Agent to select a professor",
+  "role_style": "Full professor role definition and academic style"
 }
 ```
 
-The Professor Settings tab can add professors, edit descriptions, check files, configure models, and build Chroma indexes. Adding a professor copies `prompt_system.txt`, `prompt_3_prefix.txt`, and `prompt_rerank.txt` from `professor-Template/`. The legacy `prompt_query_expansion.txt` is no longer copied because query expansion is now performed by the professor itself through `retrieve_knowledge.query`. "Build Database" clears old indexes before rebuilding, preventing duplicated chunks. After a successful build, the Main Agent cache for that professor is cleared so the new index takes effect immediately. On Windows, Chroma file handles are released before deletion or rebuild to avoid file-lock errors. Professor-page operations that change global state require exiting the current patient first; file checking is read-only and not restricted.
+The Professor Settings tab can add professors, edit names and summaries, expand and edit the full professor role and academic style, check files, configure models, and build Chroma indexes. `description` is only the short summary used by the Main Agent to select a professor; `role_style` is injected into the `{role_style}` placeholder in `prompt_system.txt`. Adding a professor copies `Description.txt`, `prompt_system.txt`, `prompt_3_prefix.txt`, and `prompt_rerank.txt` from `professor-Template/`; only if the `Description.txt` template is missing does the program create a valid JSON fallback with three empty fields. The legacy `prompt_query_expansion.txt` is no longer copied because query expansion is now performed by the professor itself through `retrieve_knowledge.query`. "Build Database" clears old indexes before rebuilding, preventing duplicated chunks. After a successful build, the Main Agent cache for that professor is cleared so the new index takes effect immediately. On Windows, Chroma file handles are released before deletion or rebuild to avoid file-lock errors. Professor-page operations that change global state require exiting the current patient first; file checking is read-only and not restricted.
 
 Each professor subagent is a multi-turn ReAct agent. Every round must emit one JSON action: `retrieve_knowledge`, `update_graffiti_wall`, `list_patient_files`, `read_patient_file`, or `reply_to_forum`. `reply_to_forum` is the normal terminal action. If `max_rounds` is reached, the system forces the professor to synthesize an answer from the currently available information and marks the forum post as a forced round-limit summary. Manual stop cooperatively propagates through LLM calls, retrieval, and reranking, and does not write to the forum.
 
 The `query` passed to `retrieve_knowledge` is generated by the professor during its reasoning loop and replaces the old separate query-expansion LLM step. The downstream retrieval quality pipeline is preserved: three-prefix classification, global/prefix dual retrieval, RRF, parent mapping, and LLM reranking. Raw retrieved passages live only in the current `answer()` call under the bottom `## 【知識庫檢索結果】` user-prompt section; each new retrieval overwrites the currently existing retrieval result, and no raw retrieval text is stored after the answer ends. Long-term `react_history` stores only queries and bounded tool summaries. Important retrieved conclusions that should persist across questions should be summarized into the graffiti wall with citations.
 
-`update_graffiti_wall` supports only `append` and `summarize`. `append` adds notes; `summarize` replaces the wall with a concise revised version already prepared by the professor. The graffiti wall persists across the same Main Agent session, and the user prompt shows its character count at the bottom of the wall section. When the wall exceeds 8000 characters, the professor prompt asks the professor to prefer `summarize`. Patient files read through `list_patient_files` / `read_patient_file` exist only in the current answer's temporary professor context; persistent patient-file insights should be summarized into the graffiti wall.
+`update_graffiti_wall` supports only `append` and `summarize`. `append` adds notes; `summarize` replaces the wall with a concise revised version already prepared by the professor. The graffiti wall persists across the same Main Agent session, and the user prompt shows its character count at the bottom of the wall section. When the wall exceeds the configured `graffiti_summarize_threshold`, the professor prompt asks the professor to prefer `summarize`. Patient files read through `list_patient_files` / `read_patient_file` exist only in the current answer's temporary professor context; persistent patient-file insights should be summarized into the graffiti wall.
 
 ### Knowledge-Base File Format (`doc/`)
 
@@ -444,19 +450,19 @@ The bundled `professor_02` demo knowledge base uses Yi Zong Jin Jian, a public-d
 
 ## Role Customization
 
-Most agent behavior is driven by external prompt files. In many cases, behavior can be adjusted by editing the relevant prompt section without changing code. A practical workflow is edit -> test -> inspect behavior -> refine.
+Agent behavior is driven jointly by shared prompt contracts and editable role settings. The physician's Main Agent habits and each professor's academic style can both be changed from the UI without manually opening prompt files. A practical workflow is edit -> test -> inspect behavior -> refine.
 
 ### 1. Main Agent Working Habits
 
-Edit the **`═══ 人類醫師的使用習慣 ═══`** section in `prompt_main_agent.txt` to describe your personal or clinic workflow, such as when the agent should proactively interview, how detailed records should be, which files should be read first, and when professors should be consulted.
+Open Model Settings and expand **Physician Working Habits** below **AI Attending Physician (Main Agent)**. Use it to describe your personal or clinic workflow, such as when the agent should proactively interview, how detailed records should be, which files should be read first, and when professors should be consulted. The content is stored in `config.json` as `main_agent.physician_preferences` and injected into `{physician_preferences}` in `prompt_main_agent.txt`.
 
 After editing, send several test instructions and inspect the **Agent Behavior Timeline** tab to confirm whether step-by-step decisions match your intended habit. If not, refine this section and test again.
 
 ### 2. Professor Academic Style
 
-Each `professor_XX/prompt_system.txt` contains a **`## 教授角色設定與學術風格`** section. Use it to define the professor's academic background, specialty, reasoning style, and voice, such as classical-formula school vs. later-formula school, preference for classical citations vs. clinical evidence, and typical wording.
+In the Professor Settings tab, expand **Professor Role and Academic Style** for a professor to define the academic background, specialty, reasoning style, and voice, such as classical-formula school vs. later-formula school, preference for classical citations vs. clinical evidence, and typical wording. This content is stored in `professor_XX/Description.txt` under `role_style` and injected into the shared `prompt_system.txt` through `{role_style}`.
 
-The professor name and one-sentence style description are separately configured in `professor_XX/Description.txt`, which is displayed in the professor list and injected into the `{description}` placeholder. The `## 教授角色設定與學術風格` section is for richer role details.
+After editing, test the professor for several rounds and refine the setting if its answers do not match the intended persona. `description` remains a one-line summary displayed in the professor list and used by the Main Agent for professor selection; it should not contain the full role prompt.
 
 ## Safety Checklist
 

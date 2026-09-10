@@ -60,6 +60,7 @@ _auto_interview_controller: AutoInterviewController | None = None
 
 def _default_config() -> dict:
     return {
+        "quick_prompts": [],
         "main_agent": {
             "api_url": "http://localhost:1234/v1",
             "api_key": "lm-studio",
@@ -126,6 +127,8 @@ def _default_config() -> dict:
         "professor_config": {
             "max_rounds": 15,
             "max_retrievals_per_answer": 3,
+            "react_history_prompt_chars": 5000,
+            "graffiti_summarize_threshold": 8000,
             "answer": {
                 "api_url": "http://localhost:1234/v1",
                 "api_key": "lm-studio",
@@ -380,6 +383,7 @@ def _build_medical_main_tab():
         app_state=app_state,
         app_context=app_context,
         load_config=load_config,
+        save_config=save_config,
         agent_factory=agent_factory,
         list_patients=list_patients,
         load_patient=load_patient,

@@ -160,7 +160,173 @@ class MainAgent:
         self._current_step_snapshot: dict | None = None
         self._stop_snapshot: dict | None = None
 
-    # ── RAG 行為 Log ──
+    # ── 教授討論區可見性與 RAG 行為 Log ──
+
+    @staticmethod
+    def _forum_selector_item_text(value: Any) -> str:
+        """將非法 selector 項目轉成短字串，供 warning/meta 使用。"""
+        try:
+            text = json.dumps(value, ensure_ascii=False)
+        except (TypeError, ValueError):
+            text = repr(value)
+        return text[:120]
+
+    def _resolve_forum_history_selection(
+        self,
+        raw_selector: Any,
+        *,
+        provided: bool,
+    ) -> dict[str, Any]:
+        """嚴格解析 all / none / [D...]，並從結構化 forum_history 篩選貼文。"""
+        available_posts = list(self.forum_history)
+        available_by_id = {
+            str(post.get("post_id", "")): post
+            for post in available_posts
+            if re.fullmatch(r"D[1-9]\d*", str(post.get("post_id", "")))
+        }
+        requested_ids: list[str] = []
+        invalid_items: list[str] = []
+        defaulted = False
+        coerced_from_string = False
+        warning = ""
+
+        if provided and isinstance(raw_selector, str):
+            stripped_selector = raw_selector.strip()
+            if stripped_selector.startswith("[") and stripped_selector.endswith("]"):
+                try:
+                    decoded_selector = json.loads(stripped_selector)
+                except (json.JSONDecodeError, TypeError):
+                    decoded_selector = None
+                if isinstance(decoded_selector, list):
+                    raw_selector = decoded_selector
+                    coerced_from_string = True
+
+        if not provided:
+            scope = "none"
+            selected_posts: list[dict] = []
+            normalized_selector: str | list[str] = "none"
+            defaulted = True
+            warning = "缺少 show_forum_history；已安全預設為 none"
+        elif isinstance(raw_selector, str) and raw_selector.strip() in {"all", "none"}:
+            normalized_selector = raw_selector.strip()
+            scope = normalized_selector
+            selected_posts = available_posts if scope == "all" else []
+        elif isinstance(raw_selector, list):
+            seen: set[str] = set()
+            fatal_list_error = False
+            for item in raw_selector:
+                if not isinstance(item, str):
+                    invalid_items.append(self._forum_selector_item_text(item))
+                    fatal_list_error = True
+                    continue
+                post_id = item.strip()
+                if post_id in {"all", "none"}:
+                    invalid_items.append(self._forum_selector_item_text(item))
+                    fatal_list_error = True
+                    continue
+                if not re.fullmatch(r"D[1-9]\d*", post_id):
+                    invalid_items.append(self._forum_selector_item_text(item))
+                    continue
+                if post_id not in seen:
+                    seen.add(post_id)
+                    requested_ids.append(post_id)
+
+            requested_set = set(requested_ids)
+            selected_posts = [
+                post for post in available_posts
+                if str(post.get("post_id", "")) in requested_set
+            ]
+            exposed_ids = [str(post.get("post_id", "")) for post in selected_posts]
+            missing_ids = [post_id for post_id in requested_ids if post_id not in available_by_id]
+            invalid_items.extend(missing_ids)
+
+            if fatal_list_error:
+                scope = "none"
+                selected_posts = []
+                exposed_ids = []
+                normalized_selector = "none"
+                defaulted = True
+                warning = (
+                    "show_forum_history 陣列含非字串或 all/none 控制值；"
+                    "已將整個選取安全降為 none"
+                )
+            elif exposed_ids:
+                scope = "selected"
+                normalized_selector = exposed_ids
+            else:
+                scope = "none"
+                normalized_selector = "none"
+                defaulted = bool(raw_selector)
+
+            if not fatal_list_error:
+                if invalid_items:
+                    warning = (
+                        "部分指定貼文 ID 無效或不存在，已忽略"
+                        if exposed_ids
+                        else "指定貼文 ID 全部無效或不存在；已安全降為 none"
+                    )
+                elif not requested_ids:
+                    warning = "show_forum_history 為空陣列；依規格視為 none"
+        else:
+            scope = "none"
+            selected_posts = []
+            normalized_selector = "none"
+            invalid_items.append(self._forum_selector_item_text(raw_selector))
+            defaulted = True
+            warning = (
+                "show_forum_history 格式無效；只接受字串 all、none 或貼文 ID 陣列，"
+                "已安全預設為 none"
+            )
+
+        if coerced_from_string:
+            coercion_warning = "show_forum_history 收到字串化 JSON 陣列，已自動轉成 JSON array"
+            warning = f"{coercion_warning}；{warning}" if warning else coercion_warning
+
+        exposed_ids = [str(post.get("post_id", "")) for post in selected_posts]
+        return {
+            "show_forum_history": normalized_selector,
+            "forum_history_scope": scope,
+            "forum_history_requested_post_ids": requested_ids,
+            "forum_history_exposed_post_ids": exposed_ids,
+            "forum_history_invalid_post_ids": invalid_items,
+            "show_forum_history_defaulted": defaulted,
+            "show_forum_history_coerced_from_string": coerced_from_string,
+            "forum_history_selection_warning": warning,
+            "posts": selected_posts,
+        }
+
+    @staticmethod
+    def _forum_history_selection_meta(selection: dict[str, Any]) -> dict[str, Any]:
+        """移除實際貼文內容，只保留可安全寫入 log/session 的選取 metadata。"""
+        return {
+            "show_forum_history": selection.get("show_forum_history", "none"),
+            "forum_history_scope": selection.get("forum_history_scope", "none"),
+            "forum_history_requested_post_ids": list(
+                selection.get("forum_history_requested_post_ids", []) or []
+            ),
+            "forum_history_exposed_post_ids": list(
+                selection.get("forum_history_exposed_post_ids", []) or []
+            ),
+            "forum_history_invalid_post_ids": list(
+                selection.get("forum_history_invalid_post_ids", []) or []
+            ),
+            "show_forum_history_defaulted": bool(
+                selection.get("show_forum_history_defaulted", False)
+            ),
+            "show_forum_history_coerced_from_string": bool(
+                selection.get("show_forum_history_coerced_from_string", False)
+            ),
+        }
+
+    @staticmethod
+    def _forum_history_selection_label(selection: dict[str, Any]) -> str:
+        scope = selection.get("forum_history_scope")
+        if scope == "all":
+            return "全部可見"
+        if scope == "selected":
+            exposed = selection.get("forum_history_exposed_post_ids", []) or []
+            return f"僅顯示 {', '.join(exposed)}"
+        return "完全隱藏"
 
     def _write_rag_log(
         self,
@@ -168,7 +334,7 @@ class MainAgent:
         professor_id: str,
         professor_name: str,
         question: str,
-        show_forum_history: bool,
+        forum_history_meta: dict[str, Any],
         retrieval_records: list[dict] | None,
         response: str,
     ):
@@ -181,6 +347,16 @@ class MainAgent:
         log_file = os.path.join(log_dir, f"{session_date}-RAG-full-behavior.txt")
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         separator = "=" * 80
+        scope = str(forum_history_meta.get("forum_history_scope", "none") or "none")
+        selector = forum_history_meta.get("show_forum_history", "none")
+        requested_ids = forum_history_meta.get("forum_history_requested_post_ids", []) or []
+        exposed_ids = forum_history_meta.get("forum_history_exposed_post_ids", []) or []
+        invalid_ids = forum_history_meta.get("forum_history_invalid_post_ids", []) or []
+        scope_labels = {
+            "all": "全部可見",
+            "none": "完全隱藏",
+            "selected": "僅顯示指定貼文",
+        }
 
         entry_lines = [
             separator,
@@ -191,7 +367,24 @@ class MainAgent:
             question,
             "",
             "## 【醫療問答討論區歷史可見性】",
-            "可見（show_forum_history=true）" if show_forum_history else "隱藏（show_forum_history=false）",
+            f"範圍：{scope_labels.get(scope, '完全隱藏')}（scope={scope}）",
+            f"正規化 show_forum_history：{json.dumps(selector, ensure_ascii=False)}",
+            (
+                "字串化陣列自動修正："
+                + (
+                    "是"
+                    if forum_history_meta.get("show_forum_history_coerced_from_string", False)
+                    else "否"
+                )
+            ),
+            f"要求的貼文 ID：{', '.join(requested_ids) if requested_ids else '（無）'}",
+            f"實際提供的貼文 ID：{', '.join(exposed_ids) if exposed_ids else '（無）'}",
+            f"無效或不存在的項目：{', '.join(invalid_ids) if invalid_ids else '（無）'}",
+            (
+                "討論區字數："
+                f"available={int(forum_history_meta.get('forum_history_chars_available', 0) or 0)}, "
+                f"exposed={int(forum_history_meta.get('forum_history_chars_exposed', 0) or 0)}"
+            ),
             "",
             "## 【本次 retrieve_knowledge 檢索紀錄】",
         ]
@@ -1311,8 +1504,8 @@ class MainAgent:
                 prof_input: dict[str, Any] = {}
                 prof_id = ""
                 prof_question = ""
-                show_forum_history = False
-                forum_visibility_defaulted = True
+                raw_show_forum_history: Any = None
+                forum_selector_provided = False
                 input_parse_error = False
                 try:
                     if isinstance(action_input, str):
@@ -1321,12 +1514,24 @@ class MainAgent:
                         prof_input = action_input
                     prof_id = prof_input.get("professor_id", "")
                     prof_question = prof_input.get("question", "")
+                    forum_selector_provided = "show_forum_history" in prof_input
                     raw_show_forum_history = prof_input.get("show_forum_history")
-                    if isinstance(raw_show_forum_history, bool):
-                        show_forum_history = raw_show_forum_history
-                        forum_visibility_defaulted = False
                 except (json.JSONDecodeError, AttributeError):
                     input_parse_error = True
+
+                forum_selection = self._resolve_forum_history_selection(
+                    raw_show_forum_history,
+                    provided=forum_selector_provided and not input_parse_error,
+                )
+                forum_selection_meta = self._forum_history_selection_meta(forum_selection)
+                full_forum_text = self._format_forum_history()
+                forum_text = self._format_forum_history(forum_selection["posts"])
+                forum_chars_available = len(full_forum_text)
+                forum_chars_exposed = len(forum_text)
+                forum_selection_meta.update({
+                    "forum_history_chars_available": forum_chars_available,
+                    "forum_history_chars_exposed": forum_chars_exposed,
+                })
 
                 self._behavior_event(
                     session_date,
@@ -1338,10 +1543,7 @@ class MainAgent:
                     turn=turn_num,
                     sub_turn=step_label,
                     target_agent="professor_subagent",
-                    meta={
-                        "show_forum_history": show_forum_history,
-                        "show_forum_history_defaulted": forum_visibility_defaulted,
-                    },
+                    meta=forum_selection_meta,
                 )
 
                 if input_parse_error:
@@ -1352,12 +1554,10 @@ class MainAgent:
                         on_step(step_record)
                     continue
 
-                step_record["show_forum_history"] = show_forum_history
-                if forum_visibility_defaulted:
-                    _log(
-                        "[Main Agent] call_professor 未提供有效布林值 show_forum_history；"
-                        "已安全預設為 false（隱藏討論區歷史）"
-                    )
+                step_record.update(forum_selection_meta)
+                selection_warning = forum_selection.get("forum_history_selection_warning", "")
+                if selection_warning:
+                    _log(f"[Main Agent] call_professor：{selection_warning}")
 
                 if not prof_id or not prof_question:
                     step_record["result"] = "call_professor: 缺少 professor_id 或 question"
@@ -1395,16 +1595,12 @@ class MainAgent:
                 _log(f"[Main Agent] 呼叫教授 {prof_id} ({prof_display_name})")
                 _log(f"[Main Agent] 提問: {prof_question[:500]}")
 
-                # show_forum_history 只控制教授本次能否看見既有討論區；
+                # show_forum_history 只控制教授本次能看見哪些既有討論區貼文；
                 # 不影響教授自己的塗鴉牆/ReAct 記憶，也不影響回答完成後寫入討論區。
-                full_forum_text = self._format_forum_history()
-                forum_text = full_forum_text if show_forum_history else ""
-                forum_chars_available = len(full_forum_text)
-                forum_chars_exposed = len(forum_text)
                 post_q_id = f"D{len(self.forum_history) + 1}"
                 post_a_id = f"D{len(self.forum_history) + 2}"
 
-                visibility_label = "可見" if show_forum_history else "隱藏"
+                visibility_label = self._forum_history_selection_label(forum_selection)
                 _log(
                     f"[Main Agent] 教授討論區歷史：{visibility_label} "
                     f"(available={forum_chars_available}, exposed={forum_chars_exposed})"
@@ -1418,7 +1614,7 @@ class MainAgent:
                     last_visit_block=last_visit_block,
                     history_summary=history_summary,
                     forum_history_text=forum_text,
-                    show_forum_history=show_forum_history,
+                    show_forum_history=forum_selection_meta["show_forum_history"],
                     loaded_files_block=self._format_loaded_files_block(),
                     image_files=self._loaded_files,
                     patient_folder=self._patient_folder,
@@ -1429,10 +1625,7 @@ class MainAgent:
                         "date_str": session_date,
                         "turn": turn_num,
                         "sub_turn": step_label,
-                        "show_forum_history": show_forum_history,
-                        "show_forum_history_defaulted": forum_visibility_defaulted,
-                        "forum_history_chars_available": forum_chars_available,
-                        "forum_history_chars_exposed": forum_chars_exposed,
+                        **forum_selection_meta,
                     },
                 )
                 if self._manual_stop_event.is_set():
@@ -1458,14 +1651,15 @@ class MainAgent:
                     prof_response = f"{forced_notice}\n\n{prof_response}"
 
                 # 教授回答完成後，將 Q/A 成對寫入 forum_history。
-                self.forum_history.append({
+                question_post = {
                     "post_id": post_q_id,
                     "role": "main_agent",
                     "professor_id": prof_id,
                     "professor_name": prof_display_name,
                     "content": prof_question,
-                    "show_forum_history": show_forum_history,
-                })
+                    **forum_selection_meta,
+                }
+                self.forum_history.append(question_post)
                 self.forum_history.append({
                     "post_id": post_a_id,
                     "role": "professor",
@@ -1492,7 +1686,7 @@ class MainAgent:
                     professor_id=prof_id,
                     professor_name=prof_display_name,
                     question=prof_question,
-                    show_forum_history=show_forum_history,
+                    forum_history_meta=forum_selection_meta,
                     retrieval_records=prof_result.get("retrieval_records", []),
                     response=prof_response,
                 )
@@ -2027,12 +2221,13 @@ class MainAgent:
 
         return None
 
-    def _format_forum_history(self) -> str:
-        """將 forum_history 格式化為文字。"""
-        if not self.forum_history:
+    def _format_forum_history(self, posts: list[dict] | None = None) -> str:
+        """將完整或已由結構化資料篩選的 forum posts 格式化為文字。"""
+        source_posts = self.forum_history if posts is None else posts
+        if not source_posts:
             return ""
         parts = []
-        for post in self.forum_history:
+        for post in source_posts:
             pid = post.get('post_id', '?')
             prof_name = post.get('professor_name', post.get('professor_id', '?'))
             prof_id = post.get('professor_id', '?')

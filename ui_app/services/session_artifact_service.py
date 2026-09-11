@@ -99,11 +99,21 @@ class SessionArtifactService:
             prof_name = post.get("professor_name", "?")
             content = post.get("content", "")
             if post.get("role") == "main_agent":
-                show_forum_history = post.get("show_forum_history")
-                if show_forum_history is True:
-                    visibility = "（本次教授可見既有討論區歷史）"
-                elif show_forum_history is False:
-                    visibility = "（本次教授未見既有討論區歷史）"
+                scope = post.get("forum_history_scope")
+                exposed_ids = post.get("forum_history_exposed_post_ids", []) or []
+                invalid_ids = post.get("forum_history_invalid_post_ids", []) or []
+                if scope == "all":
+                    visibility = "（本次教授可見全部既有討論區歷史）"
+                elif scope == "selected":
+                    visibility = f"（本次教授僅看見：{'、'.join(map(str, exposed_ids))}"
+                    if invalid_ids:
+                        visibility += f"；無效或不存在：{'、'.join(map(str, invalid_ids))}"
+                    visibility += "）"
+                elif scope == "none":
+                    visibility = "（本次教授未見既有討論區歷史"
+                    if invalid_ids:
+                        visibility += f"；無效或不存在：{'、'.join(map(str, invalid_ids))}"
+                    visibility += "）"
                 else:
                     visibility = "（討論區歷史可見性：未記錄）"
                 parts.append(

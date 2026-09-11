@@ -417,6 +417,39 @@ class ProfessorInstance:
     # ════════════════════════════════════════════════════════════
     # RAG 管線
     # ════════════════════════════════════════════════════════════
+    @staticmethod
+    def _normalize_forum_history_selector(value: Any) -> str | list[str]:
+        """第二層 fail-safe：接受正式格式，並只容忍解碼一次的字串化 JSON 陣列。"""
+        if isinstance(value, str):
+            normalized = value.strip()
+            if normalized in {"all", "none"}:
+                return normalized
+            if normalized.startswith("[") and normalized.endswith("]"):
+                try:
+                    decoded = json.loads(normalized)
+                except (json.JSONDecodeError, TypeError):
+                    return "none"
+                if isinstance(decoded, list):
+                    value = decoded
+                else:
+                    return "none"
+            else:
+                return "none"
+        if isinstance(value, list):
+            post_ids: list[str] = []
+            seen: set[str] = set()
+            for item in value:
+                if not isinstance(item, str):
+                    return "none"
+                post_id = item.strip()
+                if not re.fullmatch(r"D[1-9]\d*", post_id):
+                    return "none"
+                if post_id not in seen:
+                    seen.add(post_id)
+                    post_ids.append(post_id)
+            return post_ids if post_ids else "none"
+        return "none"
+
     def answer(
         self,
         question: str,
@@ -425,7 +458,7 @@ class ProfessorInstance:
         last_visit_block: str = "",
         history_summary: str = "",
         forum_history_text: str = "",
-        show_forum_history: bool = False,
+        show_forum_history: str | list[str] = "none",
         loaded_files_block: str = "",
         image_files: list | None = None,
         patient_folder: str | None = None,
@@ -443,7 +476,7 @@ class ProfessorInstance:
             last_visit_block: 上次就診病歷
             history_summary: 歷史病歷摘要
             forum_history_text: 本次允許教授看見的醫療問答討論區內容
-            show_forum_history: 是否向教授顯示既有醫療問答討論區；只控制討論區，不影響教授記憶
+            show_forum_history: `all`、`none` 或實際提供的 D 編號陣列；只控制討論區，不影響教授記憶
             loaded_files_block: 主 Agent 當輪讀取檔案暫存區內容
             image_files: 多模態圖片檔案（主 Agent 已讀）
             patient_folder: 患者資料夾，供教授 list/read patient files tool 使用
@@ -472,8 +505,11 @@ class ProfessorInstance:
                 log_callback(msg)
             print(msg)
 
-        # 直接呼叫 ProfessorInstance.answer() 時也採 fail-safe：只有真正的 bool True 才顯示討論區。
-        show_forum_history = show_forum_history is True
+        # 直接呼叫 ProfessorInstance.answer() 時也採 fail-safe；boolean 與其他非法值一律視為 none。
+        show_forum_history = self._normalize_forum_history_selector(show_forum_history)
+        forum_history_scope = (
+            "selected" if isinstance(show_forum_history, list) else show_forum_history
+        )
         self.max_rounds = self._parse_max_rounds(self.config)
         self.max_retrievals_per_answer = self._parse_max_retrievals(self.config)
         self.react_history_prompt_chars = self._parse_react_history_prompt_chars(self.config)
@@ -498,11 +534,25 @@ class ProfessorInstance:
                 "max_retrievals_per_answer": self.max_retrievals_per_answer,
                 "react_history_prompt_chars": self.react_history_prompt_chars,
                 "graffiti_summarize_threshold": self.graffiti_summarize_threshold,
-                "show_forum_history": bool(show_forum_history),
+                "show_forum_history": show_forum_history,
+                "forum_history_scope": forum_history_scope,
+                "forum_history_requested_post_ids": (behavior_context or {}).get(
+                    "forum_history_requested_post_ids", []
+                ),
+                "forum_history_exposed_post_ids": (behavior_context or {}).get(
+                    "forum_history_exposed_post_ids",
+                    show_forum_history if isinstance(show_forum_history, list) else [],
+                ),
+                "forum_history_invalid_post_ids": (behavior_context or {}).get(
+                    "forum_history_invalid_post_ids", []
+                ),
                 "forum_history_chars_available": (behavior_context or {}).get(
                     "forum_history_chars_available", len(forum_history_text or "")
                 ),
-                "forum_history_chars_exposed": len(forum_history_text or "") if show_forum_history else 0,
+                "forum_history_chars_exposed": (behavior_context or {}).get(
+                    "forum_history_chars_exposed",
+                    len(forum_history_text or "") if forum_history_scope != "none" else 0,
+                ),
             },
         )
 
@@ -829,7 +879,7 @@ reply_to_forum 是唯一正常結束方式；若尚未足以回答，請使用�
         note_content: str,
         at_content: str,
         forum_history_text: str,
-        show_forum_history: bool,
+        show_forum_history: str | list[str],
         main_loaded_files_block: str,
         professor_loaded_files: list[dict],
         patient_file_list_cache: str,
@@ -853,15 +903,22 @@ reply_to_forum 是唯一正常結束方式；若尚未足以回答，請使用�
             "請優先使用 update_graffiti_wall 的 summarize 模式精簡整理。）"
         )
 
-        forum_block = (
-            forum_history_text or "（目前尚無既有討論）"
-            if show_forum_history
-            else (
-                "（本次 call_professor 設定 show_forum_history=false；"
+        if show_forum_history == "all":
+            forum_block = forum_history_text or "（目前尚無既有討論）"
+        elif isinstance(show_forum_history, list):
+            selected_ids = "、".join(show_forum_history)
+            selected_content = forum_history_text or "（指定貼文目前沒有可提供的內容）"
+            forum_block = (
+                f"（本次僅提供指定討論區貼文：{selected_ids}。"
+                "未列出的討論內容已由系統隱藏，請勿猜測或重建。）\n\n"
+                f"{selected_content}"
+            )
+        else:
+            forum_block = (
+                "（本次 call_professor 設定 show_forum_history=none；"
                 "既有討論區歷史已由系統隱藏。請依目前可見的提問與患者資料獨立分析，"
                 "不要猜測或重建被隱藏的討論內容。）"
             )
-        )
 
         parts = [
             f"【提問】\n{question}",
@@ -1517,7 +1574,7 @@ reply_to_forum 是唯一正常結束方式；若尚未足以回答，請使用�
         note_content: str,
         at_content: str,
         forum_history_text: str,
-        show_forum_history: bool,
+        show_forum_history: str | list[str],
         main_loaded_files_block: str,
         professor_loaded_files: list[dict],
         patient_file_list_cache: str,

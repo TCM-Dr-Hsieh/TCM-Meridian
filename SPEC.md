@@ -274,7 +274,7 @@ Runtime prompts
 - 追加 `<date>-session.log`。
 - 保存與讀取 `<date>-chat-state.json`。
 - 保存與讀取 `<date>-interview-state.json`。
-- 保存與讀取 `<date>-forum-state.json`，並同步以原子寫入重建人類可讀的 `<date>-forum.txt`（整檔重寫，與 `forum_history` 一致；手動中斷回滾 forum 後 txt 也會跟著修正）。AI 主治醫師的教授提問標頭會依貼文 metadata 顯示「本次教授可見／未見既有討論區歷史」；舊貼文若沒有 `show_forum_history` 則標示「可見性：未記錄」。
+- 保存與讀取 `<date>-forum-state.json`，並同步以原子寫入重建人類可讀的 `<date>-forum.txt`（整檔重寫，與 `forum_history` 一致；手動中斷回滾 forum 後 txt 也會跟著修正）。AI 主治醫師的教授提問標頭會依貼文 metadata 顯示「可見全部／未見／僅看見指定 D 編號」；選取中含無效或不存在項目時一併標示。
 - 保存與讀取 `<date>-History-Summary.md`。
 - 保存 `<date>-Human-Agent-Interaction.md`。
 - 覆寫式保存項目使用原子寫入；append 型 log 維持追加寫入。
@@ -552,7 +552,7 @@ Main Agent 使用習慣：
 | `information_collection_subagent` | 暫停主 loop 並啟動問診助理。 |
 | `low_confidence_check` | 對 NOTE 執行低信心標註。 |
 | `note_review_subagent` | 檢查 NOTE 完整性，必要時啟動問診。 |
-| `call_professor` | 呼叫教授 ReAct/RAG；`action_input` 為 `{"professor_id":"...","question":"...","show_forum_history":false}`，其中 `show_forum_history` 是控制既有討論區是否對教授可見的 JSON 布林值。 |
+| `call_professor` | 呼叫教授 ReAct/RAG；`action_input.show_forum_history` 的正式格式只接受 `"all"`、`"none"` 或 JSON 陣列（每個元素為 D 編號字串，如 `["D1","D3"]`），分別代表全部、完全遮蔽或只提供指定貼文。 |
 | `list_patient_files` | 列出 `Picture_Row/`、`Medical_information/` 與/或患者根目錄歷史病歷 Markdown；病歷檔名後會附 50 字內摘要。 |
 | `read_patient_file` | 讀取文字、歷史病歷 Markdown 或圖片檔並放入當輪暫存區。 |
 
@@ -760,7 +760,7 @@ professor_XX/
 `ProfessorInstance.answer()` 流程：
 
 1. 每次諮詢開始時建立 per-call `tool_state`，清空本次知識庫檢索結果與患者檔案暫存；跨 session 保存的只有 `graffiti_wall`、有界 `react_history` 與 overflow 狀態。
-2. 注入【提問】、主 Agent 讀檔暫存、教授讀檔暫存、教授塗鴉牆、教授 ReAct 工作紀錄與 `## 【知識庫檢索結果】`。既有【醫療問答討論區】是否注入由 `call_professor.action_input.show_forum_history` 決定：`true` 傳入完整討論區；`false` 不傳原文，只顯示「歷史已由系統隱藏」提示。缺少或非布林值時安全預設為 `false`。
+2. 注入【提問】、主 Agent 讀檔暫存、教授讀檔暫存、教授塗鴉牆、教授 ReAct 工作紀錄與 `## 【知識庫檢索結果】`。既有【醫療問答討論區】由 `call_professor.action_input.show_forum_history` 控制：`"all"` 傳入全部、`"none"` 不傳原文，只顯示隱藏提示；D 編號陣列只從結構化 `forum_history` 選出指定貼文後再格式化。每個 D 編號是一篇貼文，完整問答需選兩個 ID。正式格式的陣列本身不可加引號；若模型輸出可被標準 JSON 解碼一次的字串化陣列，Main Agent 只解碼一次後套用相同驗證並記錄 coercion。boolean、單一 D 字串、逗號字串與其他非法型別不接受；缺值、非法值、空陣列或沒有有效貼文時安全使用 `"none"`。部分 D 編號格式錯誤或不存在時忽略該項，有效貼文依原始討論區順序呈現；陣列混入非字串或 `"all"`／`"none"` 控制值時整個選取降為 `"none"`。
 3. 進入最多 `professor_config.max_rounds` 輪 ReAct。每輪 answer LLM 必須輸出 raw JSON：`thought_summary`、`action`、`action_input`。
    - 完整 `react_history` 會跨 session 保存；每輪組 prompt 時若格式化後超過 `professor_config.react_history_prompt_chars`（預設 5000），只把最新設定字數放入 prompt，並記錄 `professor_react_history_truncated`（例行截斷，非錯誤）。
    - 若 `react_history` 截斷後 provider 仍回報 context overflow，`answer()` 直接回 `error`，Main Agent fail-closed，不寫入討論區。
@@ -773,7 +773,7 @@ professor_XX/
 5. 若達 `max_rounds` 仍未 `reply_to_forum`，系統呼叫 `_force_reply_to_forum()` 要求教授整理目前資訊回答；成功時回傳 `forced=True`，Main Agent 在 forum post 加上「達輪數上限後強制整理」提示。
 6. 若 Answer LLM 未設定、工具錯誤無法收斂、強制回答失敗等，`answer()` 回傳 `error`；Main Agent fail-closed，不把錯誤文字寫進討論區。
 7. manual stop 透過 `manual_stop_event` 傳入 ReAct loop，並在 LLM 呼叫前後、JSON retry、檢索與 rerank 的合作式檢查點生效；已送出的同步 API 呼叫需等待返回後才能收斂。中斷時回 `manual_stop`，Main Agent 不寫 forum、不寫 RAG log。
-8. Main Agent 針對每次成功的教授回答寫入 `<date>-RAG-full-behavior.txt`；若本次未呼叫 `retrieve_knowledge`，RAG log 明確記錄「本次未呼叫 retrieve_knowledge」。Main Agent tool behavior meta、step record、forum 提問貼文 metadata 與 RAG log 都會記錄本次 `show_forum_history`；其中 step/forum metadata 保存布林值，RAG log 保存「可見／隱藏」，console log 與 `professor_react_start` behavior meta 另記 available/exposed 字數。上述可見性紀錄都不包含被隱藏的討論區原文。人類可讀的 `<date>-forum.txt` 會在 AI 主治醫師提問標頭顯示「本次教授可見／未見既有討論區歷史」；舊貼文若沒有此欄位則顯示「可見性：未記錄」。此標記不會加入 `Main_Agent._format_forum_history()`，因此不會被重新注入教授上下文。
+8. Main Agent 針對每次成功的教授回答寫入 `<date>-RAG-full-behavior.txt`；若本次未呼叫 `retrieve_knowledge`，RAG log 明確記錄「本次未呼叫 retrieve_knowledge」。Main Agent tool behavior meta、step record、forum 提問貼文 metadata、`professor_react_start` 與 RAG log 會記錄正規化後的 `show_forum_history`、`forum_history_scope`（`all`／`none`／`selected`）、requested/exposed/invalid IDs、`show_forum_history_coerced_from_string` 與 available/exposed 字數；這些欄位都不包含被遮蔽的討論原文。人類可讀的 `<date>-forum.txt` 在 AI 主治醫師提問標頭顯示全部可見、未見或實際看見的 D 編號；選取內的無效項目亦會列出。標記不會加入 `Main_Agent._format_forum_history()`，因此不會被重新注入教授上下文。
 
 ### 10.3 Retrieval constants
 
@@ -926,8 +926,8 @@ Role prefix 包含 case、formula、herb、acupuncture、diagnoses、treatment�
 
 #### 外置 prompt 的核心約定
 
-- **提問 vs 討論區**：【提問】是本次唯一要回覆的問題。【醫療問答討論區】在 `show_forum_history=true` 時作為脈絡，不得把其中較早訊息誤認為當前任務；在 `false` 時原文不注入，教授必須依可見資料獨立分析，不得猜測被隱藏內容。此開關不控制教授既有塗鴉牆或 ReAct 記憶，也不影響成功問答最後寫入討論區。
-- **討論區盲化的已知限制**：`show_forum_history=false` 只遮蔽【醫療問答討論區】原文，不等於完全盲評。NOTE、A&T、主 Agent 讀檔暫存，以及教授跨問答保留的塗鴉牆與 ReAct 工作紀錄仍會照常注入；若這些區塊已包含其他教授的觀點、安全性等級或依其建議改寫的內容，教授仍可能受到間接影響。需要真正隔離分析時，應另行設計獨立的上下文範圍控制，不得擴張 `show_forum_history` 的語意。
+- **提問 vs 討論區**：【提問】是本次唯一要回覆的問題。【醫療問答討論區】可由 `show_forum_history="all"` 全部提供、`"none"` 完全遮蔽，或以 D 編號陣列只提供指定貼文；不得把其中較早訊息誤認為當前任務，也不得猜測未提供的貼文。此選取不控制教授既有塗鴉牆或 ReAct 記憶，也不影響成功問答最後寫入討論區。
+- **討論區選擇性盲化的已知限制**：`show_forum_history="none"` 或只選部分 D 編號只會遮蔽未提供的【醫療問答討論區】原文，不等於完全盲評。NOTE、A&T、主 Agent 讀檔暫存，以及教授跨問答保留的塗鴉牆與 ReAct 工作紀錄仍會照常注入；若這些區塊已包含其他教授的觀點、安全性等級或依其建議改寫的內容，教授仍可能受到間接影響。需要真正隔離分析時，應另行設計獨立的上下文範圍控制，不得擴張 `show_forum_history` 的語意。
 - **query 自行擴展**：`retrieve_knowledge.query` 等同舊管線的 expanded query，prompt 內含五條改寫規則（保持核心意圖、依 NOTE/A&T/討論區補入中醫與西醫關鍵詞、不得臆造病歷未提供的數值、單行、除非要找相似案例否則不加「病案／醫案／病歷」字眼）。
 - **四層生命週期**：每個工具說明都標註其產出的存活範圍——教授 prompt 內的【知識庫檢索結果】每次新檢索覆蓋且回答結束即清空（但完整檢索原文另寫入 RAG audit log，不進教授長期記憶）；【患者檔案清單】在 `read_patient_file` 後自動清空、回答結束不保存；【讀取後暫存區】只存在本次回答；【塗鴉牆】與【ReAct 工作紀錄】跨問答保留。需要供教授跨問答重用的內容必須摘要寫入塗鴉牆。
 - **塗鴉牆壓縮**：user prompt 會在塗鴉牆區塊底部顯示字數，超過 `professor_config.graffiti_summarize_threshold` 時要求優先使用 `summarize`。
@@ -1082,7 +1082,7 @@ professor_*/parent_map.jsonl
 - Information Collection 可提問、接收回答、完成、保存並恢復 Main Agent。
 - Information Collection 完成後恢復 Main Agent 時，右側即時步驟面板會重新顯示執行軌跡。
 - Professor ReAct/RAG 可回答並寫入 forum/RAG log。
-- `call_professor.show_forum_history=false` 時，既有討論區原文不會出現在教授 user prompt，僅顯示盲化提示；`true` 時會顯示完整討論區；缺少或無效值安全預設為 `false`，兩種模式的成功問答都會照常寫入 forum。
+- `call_professor.show_forum_history` 的 `"all"`、`"none"`、指定 D 編號陣列三種正式模式可正確控制教授 user prompt；字串化 JSON 陣列可被解碼一次並留下 coercion 紀錄；boolean、單一 D 字串、缺值與非法型別安全降為 `"none"`，部分無效 ID 不影響其他有效選取，且三種模式的成功問答都會照常寫入 forum。
 - Main Agent system prompt 會將 `main_agent.physician_preferences` 注入 `{physician_preferences}`；欄位缺少時使用現行六條預設習慣，明確空字串時注入「尚未設定」文字，且最終 prompt 不殘留 `{physician_preferences}` 佔位符。
 - 教授 system prompt 會注入 `Description.txt` 的 `name`；名稱為空或檔案缺漏時使用 `professor_id`，且不殘留 `{name}` 佔位符。
 - 教授 system prompt 會注入 `Description.txt` 的 `role_style`；內容為空、缺少欄位或檔案無法解析時使用預設角色風格，且不殘留 `{role_style}` 佔位符。

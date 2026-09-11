@@ -24,7 +24,7 @@ TCM-Meridian，中文名「杏林經緯」，是一套以 NiceGUI 建立的中�
 
 若你在研究或衍生工作中使用本專案，請引用：
 
-> Hsieh, H.-W. (2026). *TCM-Meridian (杏林經緯): A multi-agent, safety-oriented AI clinical assistant for Traditional Chinese Medicine* (v1.2.2). Zenodo. https://doi.org/10.5281/zenodo.20725779
+> Hsieh, H.-W. (2026). *TCM-Meridian (杏林經緯): A multi-agent, safety-oriented AI clinical assistant for Traditional Chinese Medicine* (v1.3.0). Zenodo. https://doi.org/10.5281/zenodo.20725779
 
 或點 GitHub repo 頁面右側的「**Cite this repository**」按鈕，自動取得 APA / BibTeX 格式（由 [`CITATION.cff`](CITATION.cff) 產生）。DOI `10.5281/zenodo.20725779` 為全版本（concept）DOI，永遠指向最新版本。
 
@@ -415,7 +415,7 @@ professor_XX/
 
 教授 subagent 是多輪 ReAct agent。每輪只能輸出一個 JSON action，可使用 `retrieve_knowledge`、`update_graffiti_wall`、`list_patient_files`、`read_patient_file` 或 `reply_to_forum`。`reply_to_forum` 是正常結束條件；若達 `max_rounds`，系統會要求教授強制整理目前資訊回答，並在討論區標記「達輪數上限後強制整理」。手動中斷會在 LLM 呼叫前後，以及檢索與 rerank 的合作式檢查點生效；已送出的同步 API 呼叫需等待返回後才能停止，且中斷結果不會寫入討論區。
 
-Main Agent 呼叫教授時必須在 `call_professor.action_input` 傳入 JSON 布林值 `show_forum_history`。設為 `false` 時，既有【醫療問答討論區】不會傳給教授，教授 prompt 只會看到「歷史已由系統隱藏」提示，適合討論區盲化的獨立分析與分別取得第二意見；設為 `true` 時會傳入完整討論區，適合評論、比較、處理歧見或延續既有討論。缺少或無效值會安全預設為 `false`。此開關只控制討論區歷史，不會清除教授既有塗鴉牆或 ReAct 工作紀錄；NOTE、A&T 等其他可見上下文若已含先前觀點，仍可能造成間接影響，因此 `false` 不代表完全盲評。無論是否顯示歷史，本次成功問答最後都會照常寫入討論區。行為時間線、step record、RAG log 與人類可讀的 forum 純文字紀錄會記錄本次可見性設定；舊貼文沒有此欄位時標示為「未記錄」。
+Main Agent 呼叫教授時必須在 `call_professor.action_input` 傳入 `show_forum_history`：`"all"` 顯示全部既有討論、`"none"` 完全遮蔽，或用 `["D1", "D3"]` 形式的 JSON 陣列只提供指定貼文。每個陣列元素是 D 編號字串，但陣列本身不可加引號；完整問答需同時選取提問與回答的兩個 ID。執行器會容忍並只解碼一次模型偶發輸出的字串化 JSON 陣列（如 `"[\"D1\", \"D2\"]"`），再走相同驗證流程並記錄 coercion warning；這不是正式格式。boolean、單一 `"D1"`、逗號字串及其他非法型別均不接受；缺值、非法值、空陣列或沒有任何有效貼文時會安全使用 `"none"`。部分 D 編號格式錯誤或不存在時只忽略該項，有效貼文依討論區原始順序呈現；陣列若混入非字串或 `"all"`／`"none"` 控制值則整個選取降為 `"none"`。此參數只控制討論區貼文，不會清除教授既有塗鴉牆或 ReAct 工作紀錄；NOTE、A&T 等其他可見上下文若已含先前觀點，仍可能造成間接影響，因此 `"none"` 不代表完全盲評。成功問答仍會寫入討論區。行為時間線、step record、forum metadata 與 RAG log 會保存 scope、要求／實際提供／無效 ID、coercion 狀態及 available/exposed 字數；人類可讀的 forum 純文字紀錄則標示全部、未見或實際看見的 D 編號。這些可見性欄位不寫入被遮蔽的討論原文。
 
 `retrieve_knowledge` 的 `query` 由教授依當前思考自行產生，等同舊管線的 expanded query；後續仍保留三前綴分類、全庫/前綴雙路檢索、RRF、parent mapping 與 LLM rerank。知識庫檢索原文只在本次 `answer()` 期間出現在 user prompt 最下方 `## 【知識庫檢索結果】`，新檢索會覆蓋當前已存在的結果；回答結束後不會保存到教授的 session 記憶或長期 `react_history`，後者僅保存查詢紀錄與工具摘要。為了稽核，本次各次檢索的 query、分類、來源摘要及檢索原文仍會透過 `retrieval_records` 寫入 `<date>-RAG-full-behavior.txt`。若有重要檢索結論需供教授跨問答使用，教授可摘要寫入塗鴉牆並保留來源。
 

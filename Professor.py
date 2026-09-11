@@ -425,6 +425,7 @@ class ProfessorInstance:
         last_visit_block: str = "",
         history_summary: str = "",
         forum_history_text: str = "",
+        show_forum_history: bool = False,
         loaded_files_block: str = "",
         image_files: list | None = None,
         patient_folder: str | None = None,
@@ -441,7 +442,8 @@ class ProfessorInstance:
             at_content: 辨證論治 A&T
             last_visit_block: 上次就診病歷
             history_summary: 歷史病歷摘要
-            forum_history_text: 目前的醫療問答討論區內容
+            forum_history_text: 本次允許教授看見的醫療問答討論區內容
+            show_forum_history: 是否向教授顯示既有醫療問答討論區；只控制討論區，不影響教授記憶
             loaded_files_block: 主 Agent 當輪讀取檔案暫存區內容
             image_files: 多模態圖片檔案（主 Agent 已讀）
             patient_folder: 患者資料夾，供教授 list/read patient files tool 使用
@@ -470,6 +472,8 @@ class ProfessorInstance:
                 log_callback(msg)
             print(msg)
 
+        # 直接呼叫 ProfessorInstance.answer() 時也採 fail-safe：只有真正的 bool True 才顯示討論區。
+        show_forum_history = show_forum_history is True
         self.max_rounds = self._parse_max_rounds(self.config)
         self.max_retrievals_per_answer = self._parse_max_retrievals(self.config)
         self.react_history_prompt_chars = self._parse_react_history_prompt_chars(self.config)
@@ -494,6 +498,11 @@ class ProfessorInstance:
                 "max_retrievals_per_answer": self.max_retrievals_per_answer,
                 "react_history_prompt_chars": self.react_history_prompt_chars,
                 "graffiti_summarize_threshold": self.graffiti_summarize_threshold,
+                "show_forum_history": bool(show_forum_history),
+                "forum_history_chars_available": (behavior_context or {}).get(
+                    "forum_history_chars_available", len(forum_history_text or "")
+                ),
+                "forum_history_chars_exposed": len(forum_history_text or "") if show_forum_history else 0,
             },
         )
 
@@ -549,6 +558,7 @@ class ProfessorInstance:
                 note_content=note_content,
                 at_content=at_content,
                 forum_history_text=forum_history_text,
+                show_forum_history=show_forum_history,
                 main_loaded_files_block=loaded_files_block,
                 professor_loaded_files=tool_state["professor_loaded_files"],
                 patient_file_list_cache=tool_state["patient_file_list_cache"],
@@ -684,6 +694,7 @@ class ProfessorInstance:
             note_content=note_content,
             at_content=at_content,
             forum_history_text=forum_history_text,
+            show_forum_history=show_forum_history,
             main_loaded_files_block=loaded_files_block,
             professor_loaded_files=tool_state["professor_loaded_files"],
             patient_file_list_cache=tool_state["patient_file_list_cache"],
@@ -818,6 +829,7 @@ reply_to_forum 是唯一正常結束方式；若尚未足以回答，請使用�
         note_content: str,
         at_content: str,
         forum_history_text: str,
+        show_forum_history: bool,
         main_loaded_files_block: str,
         professor_loaded_files: list[dict],
         patient_file_list_cache: str,
@@ -841,9 +853,19 @@ reply_to_forum 是唯一正常結束方式；若尚未足以回答，請使用�
             "請優先使用 update_graffiti_wall 的 summarize 模式精簡整理。）"
         )
 
+        forum_block = (
+            forum_history_text or "（目前尚無既有討論）"
+            if show_forum_history
+            else (
+                "（本次 call_professor 設定 show_forum_history=false；"
+                "既有討論區歷史已由系統隱藏。請依目前可見的提問與患者資料獨立分析，"
+                "不要猜測或重建被隱藏的討論內容。）"
+            )
+        )
+
         parts = [
             f"【提問】\n{question}",
-            f"## 【醫療問答討論區】\n{forum_history_text if forum_history_text else '（空白）'}",
+            f"## 【醫療問答討論區】\n{forum_block}",
             f"## 【今日病歷(或當前編輯頁面的病歷) - NOTE】\n{note_content or '（空白）'}",
             f"## 【今日病歷(或當前編輯頁面的病歷) - ASSESSMENT & TREATMENT】\n{at_content or '（空白）'}",
             f"## 【主 Agent 讀取後暫存區】\n{main_loaded_files_block if main_loaded_files_block else '（空白）'}",
@@ -1495,6 +1517,7 @@ reply_to_forum 是唯一正常結束方式；若尚未足以回答，請使用�
         note_content: str,
         at_content: str,
         forum_history_text: str,
+        show_forum_history: bool,
         main_loaded_files_block: str,
         professor_loaded_files: list[dict],
         patient_file_list_cache: str,
@@ -1526,6 +1549,7 @@ reply_to_forum 是唯一正常結束方式；若尚未足以回答，請使用�
             note_content=note_content,
             at_content=at_content,
             forum_history_text=forum_history_text,
+            show_forum_history=show_forum_history,
             main_loaded_files_block=main_loaded_files_block,
             professor_loaded_files=professor_loaded_files,
             patient_file_list_cache=patient_file_list_cache,

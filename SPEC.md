@@ -176,7 +176,7 @@ Runtime prompts
 - 設定教授共用模型：`answer`、`embedding`、`prefix`、`rerank`。
 - 設定教授 ReAct 上限：`max_rounds`（預設 15）與 `max_retrievals_per_answer`（預設 3；可設 0 禁止單次回答查庫）。
 - 設定教授跨問答上下文門檻：`react_history_prompt_chars`（預設 5000；prompt 僅保留最新片段）與 `graffiti_summarize_threshold`（預設 8000；只提示 summarize，不自動截斷）。
-- 設定變更後清空主 Agent 的教授 instance cache 與 `_professor_memory`（塗鴉牆與 ReAct 工作紀錄），避免新設定下的教授延用舊模型產生的記憶。
+- 儲存教授共用模型設定後，若仍存在 Main Agent instance，清空其全部教授 instance cache 與 `_professor_memory`（塗鴉牆與 ReAct 工作紀錄），避免新設定下的教授延用舊模型產生的記憶。其他教授頁操作依各自語意處理快取；由於這些操作都要求先退出患者，正常 UI 流程下不會殘留患者 session 的教授 instance。
 - 數值欄位統一以 `_read_number_or_default()` 讀取：只有 `None` 或空字串才回落預設值；`temperature=0` 與 `max_retrievals_per_answer=0` 是有效設定，`max_rounds`、`react_history_prompt_chars` 與 `graffiti_summarize_threshold` 則至少為 1。
 
 教授頁所有會改動全域狀態的操作（新增教授、儲存教授資料、建立資料庫、刪除教授、儲存教授共用模型）都要求先退出患者；有患者載入時這些按鈕會 disable 並提示，handler 也保留二次檢查。退出患者會清除 Main Agent 與 ProfessorInstance，因此儲存教授資料時不需要額外處理 runtime cache 或教授 session 記憶。此規則與「標準病歷模板設定」「模型設定」一致：全域資源只能在無患者狀態變更，避免執行中 Agent 的快取或記憶與磁碟設定脫鉤。刪除教授與重建索引前會先釋放 Chroma 連線與 mmap 檔案控制代碼（`release_chroma_handles()`），避免 Windows 上 `chroma_doc_index` 檔案被占用而刪除失敗。
@@ -274,7 +274,7 @@ Runtime prompts
 - 追加 `<date>-session.log`。
 - 保存與讀取 `<date>-chat-state.json`。
 - 保存與讀取 `<date>-interview-state.json`。
-- 保存與讀取 `<date>-forum-state.json`，並同步以原子寫入重建人類可讀的 `<date>-forum.txt`（整檔重寫，與 `forum_history` 一致；手動中斷回滾 forum 後 txt 也會跟著修正）。
+- 保存與讀取 `<date>-forum-state.json`，並同步以原子寫入重建人類可讀的 `<date>-forum.txt`（整檔重寫，與 `forum_history` 一致；手動中斷回滾 forum 後 txt 也會跟著修正）。AI 主治醫師的教授提問標頭會依貼文 metadata 顯示「本次教授可見／未見既有討論區歷史」；舊貼文若沒有 `show_forum_history` 則標示「可見性：未記錄」。
 - 保存與讀取 `<date>-History-Summary.md`。
 - 保存 `<date>-Human-Agent-Interaction.md`。
 - 覆寫式保存項目使用原子寫入；append 型 log 維持追加寫入。
@@ -552,7 +552,7 @@ Main Agent 使用習慣：
 | `information_collection_subagent` | 暫停主 loop 並啟動問診助理。 |
 | `low_confidence_check` | 對 NOTE 執行低信心標註。 |
 | `note_review_subagent` | 檢查 NOTE 完整性，必要時啟動問診。 |
-| `call_professor` | 呼叫教授 ReAct/RAG。 |
+| `call_professor` | 呼叫教授 ReAct/RAG；`action_input` 為 `{"professor_id":"...","question":"...","show_forum_history":false}`，其中 `show_forum_history` 是控制既有討論區是否對教授可見的 JSON 布林值。 |
 | `list_patient_files` | 列出 `Picture_Row/`、`Medical_information/` 與/或患者根目錄歷史病歷 Markdown；病歷檔名後會附 50 字內摘要。 |
 | `read_patient_file` | 讀取文字、歷史病歷 Markdown 或圖片檔並放入當輪暫存區。 |
 
@@ -760,20 +760,20 @@ professor_XX/
 `ProfessorInstance.answer()` 流程：
 
 1. 每次諮詢開始時建立 per-call `tool_state`，清空本次知識庫檢索結果與患者檔案暫存；跨 session 保存的只有 `graffiti_wall`、有界 `react_history` 與 overflow 狀態。
-2. 注入【提問】、【醫療問答討論區】、主 Agent 讀檔暫存、教授讀檔暫存、教授塗鴉牆、教授 ReAct 工作紀錄與 `## 【知識庫檢索結果】`。
+2. 注入【提問】、主 Agent 讀檔暫存、教授讀檔暫存、教授塗鴉牆、教授 ReAct 工作紀錄與 `## 【知識庫檢索結果】`。既有【醫療問答討論區】是否注入由 `call_professor.action_input.show_forum_history` 決定：`true` 傳入完整討論區；`false` 不傳原文，只顯示「歷史已由系統隱藏」提示。缺少或非布林值時安全預設為 `false`。
 3. 進入最多 `professor_config.max_rounds` 輪 ReAct。每輪 answer LLM 必須輸出 raw JSON：`thought_summary`、`action`、`action_input`。
    - 完整 `react_history` 會跨 session 保存；每輪組 prompt 時若格式化後超過 `professor_config.react_history_prompt_chars`（預設 5000），只把最新設定字數放入 prompt，並記錄 `professor_react_history_truncated`（例行截斷，非錯誤）。
    - 若 `react_history` 截斷後 provider 仍回報 context overflow，`answer()` 直接回 `error`，Main Agent fail-closed，不寫入討論區。
    - provider error 解析會讀取例外的 `status_code`、`code`、`type`、`body`、`response.json()` 與文字訊息；HTTP 413 或常見 context/token marker 會被視為 context overflow，但 rate-limit / quota 類錯誤不會被誤判為 context overflow。
 4. 可用 action：
-   - `retrieve_knowledge`：教授自行提供 `query`，此 query 等同舊管線的 expanded query。後續仍執行 `_classify_prefixes()`、雙路 dense retrieval、RRF、parent mapping、LLM rerank 與 parent selection。每次檢索覆蓋本次 user prompt 最下方的 `## 【知識庫檢索結果】`；回答結束後不保存 raw passages，只保存 retrieval audit records 與 `react_history` 中的 query 摘要。每次回答最多呼叫 `professor_config.max_retrievals_per_answer` 次，設 0 則完全不查庫。
+   - `retrieve_knowledge`：教授自行提供 `query`，此 query 等同舊管線的 expanded query。後續仍執行 `_classify_prefixes()`、雙路 dense retrieval、RRF、parent mapping、LLM rerank 與 parent selection。每次檢索覆蓋本次 user prompt 最下方的 `## 【知識庫檢索結果】`；回答結束後 raw passages 不會進入教授 session 記憶或長期 `react_history`，後者只保存 query 與有界工具摘要。每次檢索的 query、分類、來源摘要與 raw passages 仍透過 `retrieval_records` 回傳 Main Agent，並寫入 RAG full audit log。每次回答最多呼叫 `professor_config.max_retrievals_per_answer` 次，設 0 則完全不查庫。
    - `update_graffiti_wall`：只支援 `append` 與 `summarize`。`append` 追加內容；`summarize` 以教授已整理好的精簡新版覆蓋塗鴉牆。user prompt 會在塗鴉牆區塊底部顯示字數，超過 `professor_config.graffiti_summarize_threshold`（預設 8000）時 prompt 要求優先 summarize。
    - `list_patient_files` / `read_patient_file`：教授可讀取 Lab、圖片與歷史病歷；讀取內容只存在本次 answer 的暫存 prompt，若需跨問答保存必須摘要到塗鴉牆。
    - `reply_to_forum`：正常結束條件，Main Agent 將答案寫入【醫療問答討論區】。
 5. 若達 `max_rounds` 仍未 `reply_to_forum`，系統呼叫 `_force_reply_to_forum()` 要求教授整理目前資訊回答；成功時回傳 `forced=True`，Main Agent 在 forum post 加上「達輪數上限後強制整理」提示。
 6. 若 Answer LLM 未設定、工具錯誤無法收斂、強制回答失敗等，`answer()` 回傳 `error`；Main Agent fail-closed，不把錯誤文字寫進討論區。
-7. manual stop 透過 `manual_stop_event` 合作式傳入 ReAct loop、LLM retry、檢索與 rerank；中斷時回 `manual_stop`，Main Agent 不寫 forum、不寫 RAG log。
-8. Main Agent 針對每次教授回答寫入 `<date>-RAG-full-behavior.txt`；若本次未呼叫 `retrieve_knowledge`，RAG log 明確記錄「本次未呼叫 retrieve_knowledge」。
+7. manual stop 透過 `manual_stop_event` 傳入 ReAct loop，並在 LLM 呼叫前後、JSON retry、檢索與 rerank 的合作式檢查點生效；已送出的同步 API 呼叫需等待返回後才能收斂。中斷時回 `manual_stop`，Main Agent 不寫 forum、不寫 RAG log。
+8. Main Agent 針對每次成功的教授回答寫入 `<date>-RAG-full-behavior.txt`；若本次未呼叫 `retrieve_knowledge`，RAG log 明確記錄「本次未呼叫 retrieve_knowledge」。Main Agent tool behavior meta、step record、forum 提問貼文 metadata 與 RAG log 都會記錄本次 `show_forum_history`；其中 step/forum metadata 保存布林值，RAG log 保存「可見／隱藏」，console log 與 `professor_react_start` behavior meta 另記 available/exposed 字數。上述可見性紀錄都不包含被隱藏的討論區原文。人類可讀的 `<date>-forum.txt` 會在 AI 主治醫師提問標頭顯示「本次教授可見／未見既有討論區歷史」；舊貼文若沒有此欄位則顯示「可見性：未記錄」。此標記不會加入 `Main_Agent._format_forum_history()`，因此不會被重新注入教授上下文。
 
 ### 10.3 Retrieval constants
 
@@ -926,9 +926,10 @@ Role prefix 包含 case、formula、herb、acupuncture、diagnoses、treatment�
 
 #### 外置 prompt 的核心約定
 
-- **提問 vs 討論區**：【提問】是本次唯一要回覆的問題，【醫療問答討論區】只作為脈絡；不得把討論串中較早的訊息誤認為當前任務。
+- **提問 vs 討論區**：【提問】是本次唯一要回覆的問題。【醫療問答討論區】在 `show_forum_history=true` 時作為脈絡，不得把其中較早訊息誤認為當前任務；在 `false` 時原文不注入，教授必須依可見資料獨立分析，不得猜測被隱藏內容。此開關不控制教授既有塗鴉牆或 ReAct 記憶，也不影響成功問答最後寫入討論區。
+- **討論區盲化的已知限制**：`show_forum_history=false` 只遮蔽【醫療問答討論區】原文，不等於完全盲評。NOTE、A&T、主 Agent 讀檔暫存，以及教授跨問答保留的塗鴉牆與 ReAct 工作紀錄仍會照常注入；若這些區塊已包含其他教授的觀點、安全性等級或依其建議改寫的內容，教授仍可能受到間接影響。需要真正隔離分析時，應另行設計獨立的上下文範圍控制，不得擴張 `show_forum_history` 的語意。
 - **query 自行擴展**：`retrieve_knowledge.query` 等同舊管線的 expanded query，prompt 內含五條改寫規則（保持核心意圖、依 NOTE/A&T/討論區補入中醫與西醫關鍵詞、不得臆造病歷未提供的數值、單行、除非要找相似案例否則不加「病案／醫案／病歷」字眼）。
-- **四層生命週期**：每個工具說明都標註其產出的存活範圍——【知識庫檢索結果】每次新檢索覆蓋且回答結束即清空；【患者檔案清單】在 `read_patient_file` 後自動清空、回答結束不保存；【讀取後暫存區】只存在本次回答；【塗鴉牆】與【ReAct 工作紀錄】跨問答保留。需要跨問答保存的內容必須摘要寫入塗鴉牆。
+- **四層生命週期**：每個工具說明都標註其產出的存活範圍——教授 prompt 內的【知識庫檢索結果】每次新檢索覆蓋且回答結束即清空（但完整檢索原文另寫入 RAG audit log，不進教授長期記憶）；【患者檔案清單】在 `read_patient_file` 後自動清空、回答結束不保存；【讀取後暫存區】只存在本次回答；【塗鴉牆】與【ReAct 工作紀錄】跨問答保留。需要供教授跨問答重用的內容必須摘要寫入塗鴉牆。
 - **塗鴉牆壓縮**：user prompt 會在塗鴉牆區塊底部顯示字數，超過 `professor_config.graffiti_summarize_threshold` 時要求優先使用 `summarize`。
 - **來源引用**：每個檢索段落結尾可能有兩種來源標記——段落原文自帶的方括號來源（如 `[來源：中醫眼科學(新世纪第四版，中国中医药出版社)]`，含書名/版本/篇章）與系統在 `_retrieve()` 附加的圓括號檔名來源（如 `(來源:中医眼科学(十版) 專家分段.txt)`）。引用時優先使用方括號來源，該段落沒有方括號來源時才用圓括號檔名來源；不得編造、改寫或合併來源。若內容來自模型固有知識、一般臨床推論或患者上下文而未引用知識庫段落，則不需插入知識庫來源。
 - **回答格式**：`reply_to_forum.answer` 支援 Markdown，要求以小標、條列、分段組織，便於主 Agent 引用與判斷。
@@ -985,7 +986,7 @@ Role prefix 包含 case、formula、herb、acupuncture、diagnoses、treatment�
 - Professor Subagent 有 `max_rounds`（預設 15）與 `max_retrievals_per_answer`（預設 3；`0` 為對照組，完全不查庫），並採 **fail-closed**：`answer()` 只要回傳 `error`（Answer LLM 未設定、強制回覆失敗或回傳空 answer、截斷後仍 context overflow），主 Agent 就不寫入醫療問答討論區、不寫 RAG log，只在步驟結果標示失敗——錯誤文字不會被當成教授意見。達 `max_rounds` 後由 `_force_reply_to_forum()` 強制整理回答，成功時回傳 `forced=True`，主 Agent 會在該則討論區貼文前加上「達輪數上限後強制整理，資訊可能不完整」提示。
 - 教授設定頁可保存自訂的 `react_history_prompt_chars` 與 `graffiti_summarize_threshold`；下一次教授諮詢的工作紀錄截斷、塗鴉牆字數提示、behavior meta/log 與 context-overflow 錯誤文字皆使用新值，缺少欄位時回落 5000／8000。
 - Professor 的 `react_history` 完整保存但每筆有界（`thought_summary` 截 300 字、`action_input` 只存 20 字 preview 與字數、`observation` 只存摘要，檢索原文不入長期紀錄）；組 prompt 時若格式化後超過 `professor_config.react_history_prompt_chars`（預設 5000）只放最新片段（記 `professor_react_history_truncated`，屬正常狀態）。若截斷後 provider 仍回報 context overflow，不再嘗試多層降階，直接 fail-closed 回 `error`。provider error 解析會讀取例外的 `status_code`／`code`／`type`／`body`／`response.json()` 與文字訊息，HTTP 413 與常見 context/token marker 視為 overflow，rate-limit / quota 類錯誤則排除在外。
-- Professor 支援合作式中斷：主 Agent 把 `_manual_stop_event` 傳入 `answer()`，在每輪開頭、每次 LLM 呼叫與 JSON 重試前、工具執行入口、檢索前後與 rerank 每個父段前檢查；中斷時回傳 `error="manual_stop"`，不寫討論區也不寫 RAG log。
+- Professor 支援合作式中斷：主 Agent 把 `_manual_stop_event` 傳入 `answer()`，在每輪開頭、每次 LLM 呼叫前後與 JSON 重試前、工具執行入口、檢索前後與 rerank 每個父段前檢查；已送出的同步 API 呼叫本身不會被強制取消，需等待返回後才能收斂。中斷時回傳 `error="manual_stop"`，不寫討論區也不寫 RAG log。
 - 主 Agent 達 `MAX_SUB_TURNS` 上限時會正式收斂主輪，不殘留 `_active_turn`。
 - IC 未設定 model 時，主 Agent 不會進入永久暫停；殘留孤兒 `_suspended` 會在下個主輪或還原時清除。
 - 主 Agent 與問診流程支援合作式中斷。
@@ -1081,6 +1082,7 @@ professor_*/parent_map.jsonl
 - Information Collection 可提問、接收回答、完成、保存並恢復 Main Agent。
 - Information Collection 完成後恢復 Main Agent 時，右側即時步驟面板會重新顯示執行軌跡。
 - Professor ReAct/RAG 可回答並寫入 forum/RAG log。
+- `call_professor.show_forum_history=false` 時，既有討論區原文不會出現在教授 user prompt，僅顯示盲化提示；`true` 時會顯示完整討論區；缺少或無效值安全預設為 `false`，兩種模式的成功問答都會照常寫入 forum。
 - Main Agent system prompt 會將 `main_agent.physician_preferences` 注入 `{physician_preferences}`；欄位缺少時使用現行六條預設習慣，明確空字串時注入「尚未設定」文字，且最終 prompt 不殘留 `{physician_preferences}` 佔位符。
 - 教授 system prompt 會注入 `Description.txt` 的 `name`；名稱為空或檔案缺漏時使用 `professor_id`，且不殘留 `{name}` 佔位符。
 - 教授 system prompt 會注入 `Description.txt` 的 `role_style`；內容為空、缺少欄位或檔案無法解析時使用預設角色風格，且不殘留 `{role_style}` 佔位符。

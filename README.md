@@ -24,7 +24,7 @@ TCM-Meridian，中文名「杏林經緯」，是一套以 NiceGUI 建立的中�
 
 若你在研究或衍生工作中使用本專案，請引用：
 
-> Hsieh, H.-W. (2026). *TCM-Meridian (杏林經緯): A multi-agent, safety-oriented AI clinical assistant for Traditional Chinese Medicine* (v1.2.1). Zenodo. https://doi.org/10.5281/zenodo.20725779
+> Hsieh, H.-W. (2026). *TCM-Meridian (杏林經緯): A multi-agent, safety-oriented AI clinical assistant for Traditional Chinese Medicine* (v1.2.2). Zenodo. https://doi.org/10.5281/zenodo.20725779
 
 或點 GitHub repo 頁面右側的「**Cite this repository**」按鈕，自動取得 APA / BibTeX 格式（由 [`CITATION.cff`](CITATION.cff) 產生）。DOI `10.5281/zenodo.20725779` 為全版本（concept）DOI，永遠指向最新版本。
 
@@ -187,6 +187,7 @@ pip install -r requirements.txt
 
 ```json
 {
+  "quick_prompts": [],
   "main_agent": {
     "api_url": "http://localhost:1234/v1",
     "api_key": "lm-studio",
@@ -297,7 +298,7 @@ Main Agent 子模型 `main_agent.history_summary`（歷史病歷摘要/檢查）
 
 數值欄位的空值與 `0` 是分開處理的：「模型設定」與「教授設定」兩頁只有在欄位**清空**時才會回落預設值。允許 `0` 的欄位會照實保存，例如 `temperature=0` 可用於決定性輸出；要求正數的 `max_rounds`、`react_history_prompt_chars` 與 `graffiti_summarize_threshold` 則至少為 1。
 
-教授 ReAct/RAG 另外分成回答模型、embedding、三前綴分類與 rerank 模型。`max_rounds` 控制每次教授諮詢最多 ReAct 輪數（預設 15），`max_retrievals_per_answer` 控制每次回答最多知識庫檢索次數（預設 3；設為 0 代表本次教授禁止查庫，只能用自身知識、討論區與患者檔案回答）。教授設定頁也可調整 `react_history_prompt_chars`（預設 5000；完整工作紀錄超過此值時，prompt 只放最新片段）與 `graffiti_summarize_threshold`（預設 8000；超過時提示教授優先整理塗鴉牆，但不自動截斷）。若截斷工作紀錄後仍被模型回報 context overflow，教授回答會 fail-closed 回錯誤，不寫入討論區。
+教授 ReAct/RAG 另外分成回答模型、embedding、三前綴分類與 rerank 模型。`max_rounds` 控制每次教授諮詢最多 ReAct 輪數（預設 15），`max_retrievals_per_answer` 控制每次回答最多知識庫檢索次數（預設 3；設為 0 代表本次教授禁止查庫，只能用自身知識、當次可見上下文與患者檔案回答）。教授設定頁也可調整 `react_history_prompt_chars`（預設 5000；完整工作紀錄超過此值時，prompt 只放最新片段）與 `graffiti_summarize_threshold`（預設 8000；超過時提示教授優先整理塗鴉牆，但不自動截斷）。若截斷工作紀錄後仍被模型回報 context overflow，教授回答會 fail-closed 回錯誤，不寫入討論區。
 
 ## UI 分頁
 
@@ -412,9 +413,11 @@ professor_XX/
 
 可在「教授設定」分頁新增教授、修改名稱與簡介、展開編輯完整的「教授角色設定與學術風格」、檢查檔案、設定模型與建立 Chroma index。`description` 只是供主 Agent 選擇教授的短簡介；`role_style` 會注入 `prompt_system.txt` 的 `{role_style}`。新增教授會從 `professor-Template/` 複製 `Description.txt`、`prompt_system.txt`、`prompt_3_prefix.txt` 與 `prompt_rerank.txt`；若 `Description.txt` 模板缺失，程式才建立含三個空欄位的合法 JSON fallback。舊版 `prompt_query_expansion.txt` 已不再複製，因為查詢擴展改由教授 ReAct 自行在 `retrieve_knowledge.query` 中完成。「建立資料庫」會在重建前先清除舊索引（避免 chunk 疊加重複），建立成功後清除主 Agent 對該教授的快取，使新索引立即生效；刪除教授與重建前會先釋放 Chroma 檔案控制代碼，避免 Windows 檔案占用錯誤。教授頁所有會改動全域狀態的操作（新增/儲存教授資料/建庫/刪除/儲存共用模型）都要求先退出患者（「檢查檔案」為 read-only 不受限）。
 
-教授 subagent 是多輪 ReAct agent。每輪只能輸出一個 JSON action，可使用 `retrieve_knowledge`、`update_graffiti_wall`、`list_patient_files`、`read_patient_file` 或 `reply_to_forum`。`reply_to_forum` 是正常結束條件；若達 `max_rounds`，系統會要求教授強制整理目前資訊回答，並在討論區標記「達輪數上限後強制整理」。手動中斷會合作式穿過 LLM 呼叫、檢索與 rerank，不會寫入討論區。
+教授 subagent 是多輪 ReAct agent。每輪只能輸出一個 JSON action，可使用 `retrieve_knowledge`、`update_graffiti_wall`、`list_patient_files`、`read_patient_file` 或 `reply_to_forum`。`reply_to_forum` 是正常結束條件；若達 `max_rounds`，系統會要求教授強制整理目前資訊回答，並在討論區標記「達輪數上限後強制整理」。手動中斷會在 LLM 呼叫前後，以及檢索與 rerank 的合作式檢查點生效；已送出的同步 API 呼叫需等待返回後才能停止，且中斷結果不會寫入討論區。
 
-`retrieve_knowledge` 的 `query` 由教授依當前思考自行產生，等同舊管線的 expanded query；後續仍保留三前綴分類、全庫/前綴雙路檢索、RRF、parent mapping 與 LLM rerank。知識庫檢索原文只活在本次 `answer()` 的 user prompt 最下方 `## 【知識庫檢索結果】`，新檢索會覆蓋當前已存在的結果；回答結束後不保存原文，長期 `react_history` 僅保存查詢紀錄與工具摘要。若有重要檢索結論需跨問答保留，教授可摘要寫入塗鴉牆並保留來源。
+Main Agent 呼叫教授時必須在 `call_professor.action_input` 傳入 JSON 布林值 `show_forum_history`。設為 `false` 時，既有【醫療問答討論區】不會傳給教授，教授 prompt 只會看到「歷史已由系統隱藏」提示，適合討論區盲化的獨立分析與分別取得第二意見；設為 `true` 時會傳入完整討論區，適合評論、比較、處理歧見或延續既有討論。缺少或無效值會安全預設為 `false`。此開關只控制討論區歷史，不會清除教授既有塗鴉牆或 ReAct 工作紀錄；NOTE、A&T 等其他可見上下文若已含先前觀點，仍可能造成間接影響，因此 `false` 不代表完全盲評。無論是否顯示歷史，本次成功問答最後都會照常寫入討論區。行為時間線、step record、RAG log 與人類可讀的 forum 純文字紀錄會記錄本次可見性設定；舊貼文沒有此欄位時標示為「未記錄」。
+
+`retrieve_knowledge` 的 `query` 由教授依當前思考自行產生，等同舊管線的 expanded query；後續仍保留三前綴分類、全庫/前綴雙路檢索、RRF、parent mapping 與 LLM rerank。知識庫檢索原文只在本次 `answer()` 期間出現在 user prompt 最下方 `## 【知識庫檢索結果】`，新檢索會覆蓋當前已存在的結果；回答結束後不會保存到教授的 session 記憶或長期 `react_history`，後者僅保存查詢紀錄與工具摘要。為了稽核，本次各次檢索的 query、分類、來源摘要及檢索原文仍會透過 `retrieval_records` 寫入 `<date>-RAG-full-behavior.txt`。若有重要檢索結論需供教授跨問答使用，教授可摘要寫入塗鴉牆並保留來源。
 
 `update_graffiti_wall` 只有 `append` 與 `summarize` 兩種模式。`append` 追加草稿；`summarize` 用教授已整理好的精簡新版覆蓋舊塗鴉牆。塗鴉牆會跨同一 Main Agent session 保留，user prompt 會在塗鴉牆區塊底部顯示字數；超過教授設定頁的 `graffiti_summarize_threshold` 時，教授 prompt 要求優先使用 `summarize` 壓縮整理。教授以 `list_patient_files` / `read_patient_file` 讀取的患者檔案只存在本次回答暫存區，若需要跨問答保留，也應摘要到塗鴉牆。
 

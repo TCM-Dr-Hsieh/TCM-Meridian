@@ -168,6 +168,7 @@ class MainAgent:
         professor_id: str,
         professor_name: str,
         question: str,
+        show_forum_history: bool,
         retrieval_records: list[dict] | None,
         response: str,
     ):
@@ -188,6 +189,9 @@ class MainAgent:
             "",
             "## 【主 Agent 的提問】",
             question,
+            "",
+            "## 【醫療問答討論區歷史可見性】",
+            "可見（show_forum_history=true）" if show_forum_history else "隱藏（show_forum_history=false）",
             "",
             "## 【本次 retrieve_knowledge 檢索紀錄】",
         ]
@@ -1303,6 +1307,27 @@ class MainAgent:
                     continue
 
             elif action == "call_professor":
+                # 諮詢中醫教授
+                prof_input: dict[str, Any] = {}
+                prof_id = ""
+                prof_question = ""
+                show_forum_history = False
+                forum_visibility_defaulted = True
+                input_parse_error = False
+                try:
+                    if isinstance(action_input, str):
+                        prof_input = json.loads(action_input)
+                    else:
+                        prof_input = action_input
+                    prof_id = prof_input.get("professor_id", "")
+                    prof_question = prof_input.get("question", "")
+                    raw_show_forum_history = prof_input.get("show_forum_history")
+                    if isinstance(raw_show_forum_history, bool):
+                        show_forum_history = raw_show_forum_history
+                        forum_visibility_defaulted = False
+                except (json.JSONDecodeError, AttributeError):
+                    input_parse_error = True
+
                 self._behavior_event(
                     session_date,
                     agent="main_agent",
@@ -1313,22 +1338,26 @@ class MainAgent:
                     turn=turn_num,
                     sub_turn=step_label,
                     target_agent="professor_subagent",
+                    meta={
+                        "show_forum_history": show_forum_history,
+                        "show_forum_history_defaulted": forum_visibility_defaulted,
+                    },
                 )
-                # 諮詢中醫教授
-                try:
-                    if isinstance(action_input, str):
-                        prof_input = json.loads(action_input)
-                    else:
-                        prof_input = action_input
-                    prof_id = prof_input.get("professor_id", "")
-                    prof_question = prof_input.get("question", "")
-                except (json.JSONDecodeError, AttributeError):
+
+                if input_parse_error:
                     step_record["result"] = "call_professor: action_input 格式錯誤（需 JSON 物件）"
                     steps.append(step_record)
                     _mark_progress()
                     if on_step:
                         on_step(step_record)
                     continue
+
+                step_record["show_forum_history"] = show_forum_history
+                if forum_visibility_defaulted:
+                    _log(
+                        "[Main Agent] call_professor 未提供有效布林值 show_forum_history；"
+                        "已安全預設為 false（隱藏討論區歷史）"
+                    )
 
                 if not prof_id or not prof_question:
                     step_record["result"] = "call_professor: 缺少 professor_id 或 question"
@@ -1366,10 +1395,20 @@ class MainAgent:
                 _log(f"[Main Agent] 呼叫教授 {prof_id} ({prof_display_name})")
                 _log(f"[Main Agent] 提問: {prof_question[:500]}")
 
-                # 格式化 forum_history 文字
-                forum_text = self._format_forum_history()
+                # show_forum_history 只控制教授本次能否看見既有討論區；
+                # 不影響教授自己的塗鴉牆/ReAct 記憶，也不影響回答完成後寫入討論區。
+                full_forum_text = self._format_forum_history()
+                forum_text = full_forum_text if show_forum_history else ""
+                forum_chars_available = len(full_forum_text)
+                forum_chars_exposed = len(forum_text)
                 post_q_id = f"D{len(self.forum_history) + 1}"
                 post_a_id = f"D{len(self.forum_history) + 2}"
+
+                visibility_label = "可見" if show_forum_history else "隱藏"
+                _log(
+                    f"[Main Agent] 教授討論區歷史：{visibility_label} "
+                    f"(available={forum_chars_available}, exposed={forum_chars_exposed})"
+                )
 
                 # 呼叫教授 ReAct 執行器
                 prof_result = prof_inst.answer(
@@ -1379,6 +1418,7 @@ class MainAgent:
                     last_visit_block=last_visit_block,
                     history_summary=history_summary,
                     forum_history_text=forum_text,
+                    show_forum_history=show_forum_history,
                     loaded_files_block=self._format_loaded_files_block(),
                     image_files=self._loaded_files,
                     patient_folder=self._patient_folder,
@@ -1389,6 +1429,10 @@ class MainAgent:
                         "date_str": session_date,
                         "turn": turn_num,
                         "sub_turn": step_label,
+                        "show_forum_history": show_forum_history,
+                        "show_forum_history_defaulted": forum_visibility_defaulted,
+                        "forum_history_chars_available": forum_chars_available,
+                        "forum_history_chars_exposed": forum_chars_exposed,
                     },
                 )
                 if self._manual_stop_event.is_set():
@@ -1420,6 +1464,7 @@ class MainAgent:
                     "professor_id": prof_id,
                     "professor_name": prof_display_name,
                     "content": prof_question,
+                    "show_forum_history": show_forum_history,
                 })
                 self.forum_history.append({
                     "post_id": post_a_id,
@@ -1447,6 +1492,7 @@ class MainAgent:
                     professor_id=prof_id,
                     professor_name=prof_display_name,
                     question=prof_question,
+                    show_forum_history=show_forum_history,
                     retrieval_records=prof_result.get("retrieval_records", []),
                     response=prof_response,
                 )

@@ -99,7 +99,17 @@ class SessionArtifactService:
             prof_name = post.get("professor_name", "?")
             content = post.get("content", "")
             if post.get("role") == "main_agent":
-                parts.append(f"<對話欄{post_id}，AI 主治醫師呼叫 {prof_id} ({prof_name})>\n{content}")
+                show_forum_history = post.get("show_forum_history")
+                if show_forum_history is True:
+                    visibility = "（本次教授可見既有討論區歷史）"
+                elif show_forum_history is False:
+                    visibility = "（本次教授未見既有討論區歷史）"
+                else:
+                    visibility = "（討論區歷史可見性：未記錄）"
+                parts.append(
+                    f"<對話欄{post_id}，AI 主治醫師呼叫 {prof_id} ({prof_name})>"
+                    f"{visibility}\n{content}"
+                )
             else:
                 parts.append(f"<對話欄{post_id}，{prof_id} ({prof_name})的回答>\n{content}")
         return "\n\n".join(parts) + ("\n" if parts else "")

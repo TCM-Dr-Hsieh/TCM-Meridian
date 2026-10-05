@@ -99,6 +99,10 @@ Storage Layer
 ├── Record_Template.txt
 ├── config.json
 ├── requirements.txt
+├── constraints.txt            # Tested, pinned package versions (used by the installer)
+├── install.cmd / setup.ps1    # One-click install (Windows)
+├── start.cmd / start.ps1      # One-click start (Windows)
+├── tools/doctor.py            # Environment health check
 ├── SPEC.md
 ├── ui_app/
 │   ├── context.py
@@ -120,15 +124,16 @@ Storage Layer
 
 ## Requirements
 
-- Python 3.10 or later is recommended.
+- The Windows one-click installer uses Python 3.12; for a manual install, Python 3.10 or later is recommended.
 - The Main Agent and subagents require an OpenAI-compatible chat API.
 - Professor ReAct/RAG requires an OpenAI-compatible embedding endpoint.
 - LM Studio, OpenRouter, or other compatible services can be used.
+- No GPU is needed and no model is downloaded: every LLM and embedding call goes through an API.
 
-Install dependencies:
+Install dependencies manually (the one-click installer already does this; see the next section):
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.txt -c constraints.txt
 ```
 
 Main packages:
@@ -143,10 +148,27 @@ Main packages:
 
 ## Quick Start
 
+### One-click install and start (Windows)
+
+**No pre-installed conda or Python environment is required.**
+
+1. Double-click `install.cmd` (or run `.\setup.ps1` in PowerShell). It runs: preflight (OS, disk space, network) -> find Python 3.12 (if missing, installs it with winget **after asking you**, for the current user only) -> create a project-local `.venv` and install the tested package versions from `constraints.txt` -> create `config.json` from `config.example.json` when it does not exist (**an existing one is never overwritten**) -> health check (`tools\doctor.py`). It can be re-run safely: finished steps are skipped. The log is written to `setup.log`.
+2. Double-click `start.cmd` (or `.\start.ps1`). The browser opens `http://localhost:8080` automatically.
+3. In the Model Settings tab, enter each agent's API URL, key, and model name. To use a professor's knowledge base, set an embedding model in the Professor Settings tab and click "Build Database". The installer does **not** configure any LLM and does **not** build vector indexes.
+
+Notes:
+
+- If running `.\setup.ps1` directly is blocked by the execution policy, use `powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1` (`install.cmd` already does). Add `-Force` to rebuild `.venv`, or `-SkipDoctor` to skip the health check.
+- Keep the project path short to stay clear of the 260-character Windows path limit (the script warns when the path is long and long-path support is disabled).
+- Re-run the health check at any time: `.venv\Scripts\python.exe tools\doctor.py` (it only checks the environment, files, and configuration; it never contacts any model server and never prints API keys).
+- One-click start does **not** use NiceGUI's auto-reload (a development feature). For development with auto-reload, run `python TCM_Meridian_main.py` directly.
+
+### Manual install
+
 1. Install dependencies.
 
    ```bash
-   pip install -r requirements.txt
+   pip install -r requirements.txt -c constraints.txt
    ```
 
 2. Copy the configuration template and fill in your API endpoint, key, and model names. These can also be edited later in the Model Settings and Professor Settings tabs.
@@ -167,7 +189,7 @@ Main packages:
    http://localhost:8080
    ```
 
-The current application binds to `0.0.0.0:8080` and starts with NiceGUI reload mode enabled.
+Running `python TCM_Meridian_main.py` directly binds to `0.0.0.0:8080` by default (other devices on the LAN can connect) and starts with NiceGUI reload mode enabled; `start.cmd` uses the same binding with reload turned off. Environment variables adjust this: `TCM_HOST` (default `0.0.0.0`), `TCM_PORT` (default `8080`), and `TCM_RELOAD` (set to `0` to disable auto-reload). The system holds patient data and has no login; for local-only use, setting `TCM_HOST=127.0.0.1` is recommended.
 
 ## Tutorial Videos
 

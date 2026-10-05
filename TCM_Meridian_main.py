@@ -411,13 +411,18 @@ def _build_medical_main_tab():
 
 
 def run_app():
-    """Start the NiceGUI application."""
+    """Start the NiceGUI application.
+
+    預設與過去相同：0.0.0.0:8080、reload 模式。可用環境變數調整（start.cmd 會設 TCM_RELOAD=0）：
+      TCM_HOST（預設 0.0.0.0）、TCM_PORT（預設 8080）、TCM_RELOAD（0 / false 關閉自動重載）。
+    """
     build_ui()
+    reload_enabled = os.environ.get("TCM_RELOAD", "1").strip().lower() not in {"0", "false", "no", "off"}
     ui.run(
         title="杏林經緯 TCM-Meridian",
-        host="0.0.0.0",
-        port=8080,
-        reload=True,
+        host=os.environ.get("TCM_HOST", "0.0.0.0"),
+        port=int(os.environ.get("TCM_PORT", "8080")),
+        reload=reload_enabled,
         favicon="🌿",
     )
 

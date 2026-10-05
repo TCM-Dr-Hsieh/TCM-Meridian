@@ -100,6 +100,10 @@ Storage Layer
 ├── Record_Template.txt
 ├── config.json
 ├── requirements.txt
+├── constraints.txt            # 已測試的套件固定版本（install 用）
+├── install.cmd / setup.ps1    # 一鍵安裝（Windows）
+├── start.cmd / start.ps1      # 一鍵啟動（Windows）
+├── tools/doctor.py            # 環境健檢
 ├── SPEC.md
 ├── ui_app/
 │   ├── context.py
@@ -121,15 +125,16 @@ Storage Layer
 
 ## 環境需求
 
-- 建議 Python 3.10 以上。
+- Windows 一鍵安裝使用 Python 3.12；手動安裝建議 Python 3.10 以上。
 - 主 Agent 與 Subagent 需要 OpenAI-compatible chat API。
 - 教授 ReAct/RAG 需要 OpenAI-compatible embedding endpoint。
 - 可搭配 LM Studio、OpenRouter 或其他相容服務。
+- 不需要 GPU，也不下載任何模型：所有 LLM 與 embedding 都走 API。
 
-安裝依賴：
+手動安裝依賴（一鍵安裝已涵蓋，見下節）：
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.txt -c constraints.txt
 ```
 
 主要套件：
@@ -144,10 +149,27 @@ pip install -r requirements.txt
 
 ## 快速開始
 
+### 一鍵安裝與啟動（Windows）
+
+**不需要預先安裝 conda 或任何 Python 環境。**
+
+1. 雙擊 `install.cmd`（或在 PowerShell 執行 `.\setup.ps1`）。它會依序：預檢（系統、磁碟、網路）→ 找 Python 3.12（找不到時**經你同意**用 winget 安裝，只裝給目前使用者）→ 在專案內建立 `.venv` 並依 `constraints.txt` 安裝已測試版本的套件 → 沒有 `config.json` 時由 `config.example.json` 複製（**已存在的絕不覆蓋**）→ 健檢（`tools\doctor.py`）。可重複執行，已完成的步驟會略過；記錄寫在 `setup.log`。
+2. 雙擊 `start.cmd`（或 `.\start.ps1`）啟動，瀏覽器會自動開啟 `http://localhost:8080`。
+3. 到「模型設定」分頁填入各 Agent 的 API 網址、金鑰與模型名稱；教授要用知識庫時，到「教授設定」分頁設好 embedding 模型後按「建立資料庫」。安裝腳本**不會**設定任何 LLM，也不會建立向量索引。
+
+其他：
+
+- 若直接執行 `.\setup.ps1` 被「執行原則」擋住，改用 `powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1`（`install.cmd` 已經這樣做）。可加 `-Force` 重建 `.venv`、`-SkipDoctor` 略過健檢。
+- 專案路徑請盡量短，避免 Windows 260 字元路徑上限（腳本偵測到過長路徑且未啟用長路徑支援時會提醒）。
+- 隨時可重新健檢：`.venv\Scripts\python.exe tools\doctor.py`（只檢查環境、檔案與設定，不會連線測試任何模型，也不會印出金鑰）。
+- 一鍵啟動預設**不使用** NiceGUI 的自動重載（開發用功能）。要在開發時使用自動重載，直接執行 `python TCM_Meridian_main.py` 即可。
+
+### 手動安裝
+
 1. 安裝依賴。
 
    ```bash
-   pip install -r requirements.txt
+   pip install -r requirements.txt -c constraints.txt
    ```
 
 2. 複製設定範本並填入自己的 API endpoint / key / 模型名稱（之後也可在「模型設定」「教授設定」分頁調整）。
@@ -168,7 +190,7 @@ pip install -r requirements.txt
    http://localhost:8080
    ```
 
-目前程式碼會綁定 `0.0.0.0:8080`，並以 NiceGUI reload 模式啟動。
+直接執行 `python TCM_Meridian_main.py` 時，預設綁定 `0.0.0.0:8080`（區網內的其他裝置也能連到），並以 NiceGUI reload 模式啟動；`start.cmd` 則是同樣綁定但關閉 reload。可用環境變數調整：`TCM_HOST`（預設 `0.0.0.0`）、`TCM_PORT`（預設 `8080`）、`TCM_RELOAD`（設為 `0` 關閉自動重載）。系統內含患者資料且沒有登入驗證；只在本機使用時，建議設 `TCM_HOST=127.0.0.1`。
 
 ## 教學影片
 

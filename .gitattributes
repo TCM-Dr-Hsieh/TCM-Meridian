@@ -1,2 +1,7 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Windows scripts must have CRLF line endings on every platform (cmd.exe / Windows PowerShell 5.1).
+# setup.ps1 also needs its UTF-8 BOM (Windows PowerShell 5.1 reads BOM-less files as ANSI and garbles the Chinese text); Git keeps it as is.
+*.cmd text eol=crlf
+*.ps1 text eol=crlf

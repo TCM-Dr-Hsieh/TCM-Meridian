@@ -18,6 +18,9 @@ patient_data/*
 .venv/
 venv/
 
+# ── 一鍵安裝記錄（setup.ps1 的 transcript，可能含本機路徑）──
+setup.log
+
 # ── 編輯器 / 系統 ──
 .vscode/
 .idea/

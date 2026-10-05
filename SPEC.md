@@ -42,6 +42,26 @@ ui.run(
 )
 ```
 
+以上是預設值。`run_app()` 另外讀三個環境變數，未設定時行為與上列完全相同：
+
+| 環境變數 | 預設 | 作用 |
+| --- | --- | --- |
+| `TCM_HOST` | `0.0.0.0` | 綁定位址（僅本機使用時可設 `127.0.0.1`） |
+| `TCM_PORT` | `8080` | 埠 |
+| `TCM_RELOAD` | 開啟 | 設為 `0` / `false` / `no` / `off` 關閉 NiceGUI 自動重載 |
+
+### 2.1 一鍵安裝與啟動（Windows）
+
+檔案：`install.cmd`、`setup.ps1`、`start.cmd`、`start.ps1`、`tools/doctor.py`、`requirements.txt`、`constraints.txt`。
+
+- `install.cmd` 以 `-ExecutionPolicy Bypass` 呼叫 `setup.ps1` 並 `pause`。`setup.ps1` 依序：預檢（64 位元 Windows、磁碟 ≥ 3 GB、PyPI 可連線、長路徑提醒）→ 找 Python 3.12（`py -3.12`、PATH、常見安裝路徑；找不到時經使用者同意用 winget 安裝到使用者範圍）→ 建立專案內 `.venv` 並 `pip install -r requirements.txt -c constraints.txt` → 沒有 `config.json` 時由 `config.example.json` 複製（**已存在的絕不覆蓋**）並建立 `patient_data/` → 執行 `tools/doctor.py`。結束碼：0 成功、1 安裝失敗、2 安裝完成但健檢有 FAIL。可重複執行，已完成的步驟會略過；記錄寫入 `setup.log`（已被 `.gitignore` 排除）。參數：`-BasePython`、`-SkipDoctor`、`-Force`（重建 `.venv`）、`-Yes`（不詢問）。
+- 本專案的 LLM 與 embedding 都走 OpenAI-compatible API，因此安裝**不需要 GPU、不下載模型、不安裝 PyTorch**，`.venv` 約 500 MB。舊版 `requirements.txt` 中的 `sentence-transformers`（程式碼從未 import，且會連帶安裝 PyTorch）已移除。
+- 安裝**不設定任何 LLM / embedding**，也不建立教授向量索引；兩者都在 UI 中完成（「模型設定」「教授設定」→「建立資料庫」）。
+- `constraints.txt` 是在乾淨 venv（CPython 3.12、Windows x64）安裝 `requirements.txt` 後的 `pip freeze`，使每台電腦取得相同的已測試版本；刻意升級時，在拋棄式 venv 安裝新版、實際操作驗證後再重新產生。
+- `start.cmd` / `start.ps1`：沒有 `.venv` 時提示先執行 install 並以非 0 結束；否則設定 `TCM_RELOAD=0` 後以 `.venv` 的 Python 執行 `TCM_Meridian_main.py`。綁定位址與埠與直接執行相同（`0.0.0.0:8080`）；NiceGUI 預設會自動開啟瀏覽器。直接 `python TCM_Meridian_main.py` 的行為不變（reload 開啟）。
+- `tools/doctor.py`：檢查 Python／`.venv`、套件可匯入（含 `Chroma`、`Document` 與 `Main_Agent`、`Professor` 模組）、必要檔案、`config.json` 格式與各 Agent endpoint 是否仍是佔位符或未填（只提示、不印金鑰）、`patient_data/` 可寫、各教授索引是否已建立、埠是否被占用。**不會連線測試任何 LLM / embedding 伺服器。** 任何 FAIL 以結束碼 1 結束；WARN／INFO 不阻擋使用。
+- `.gitattributes` 強制 `*.cmd`、`*.ps1` 使用 CRLF；`setup.ps1` 必須保留 UTF-8 BOM（Windows PowerShell 5.1 會把無 BOM 檔案當 ANSI 讀取而使中文亂碼）。
+
 ## 3. 程式碼分層
 
 ```text
@@ -880,6 +900,31 @@ Role prefix 包含 case、formula、herb、acupuncture、diagnoses、treatment�
 - 保留來源歸因。
 - 若重要資訊遺漏會影響安全或診療方向，需明確處理。
 
+未知 (c)「部分回答」沿用 mini 的全稱作用域規則：合併詢問多個症狀後，作用域不明的整體回答須保留原問答與來源，個別症狀記未知／待逐項確認，不能展開為逐項陽性或陰性。明確全稱且清楚確認（含「這些都沒有嗎？—沒有」）或逐項回答，依實際答案記錄；只回「嗯／喔」仍屬未釐清。Record、Hallucination 與 Low Confidence prompts 使用相同 (c) 定義，保留本專案的來源標籤。
+
+幻覺審查應放行符合規範的 (c) 寫法，但重要原問答整段遺漏仍依 H 類處理。低信心掃描第 2.4 節則必須警示仍未釐清的 (c)：有逐項未知欄位時標各項臨床片段，只有原問答時標整體回答的短語；標籤留在粗體外，已標位置不重複標。正確未知可通過幻覺審查，同時仍需低信心警示。Note Review 把未釐清項目列入補問；Information Collection 逐項釐清並遵守既有回合上限；已取得明確後續回答者提醒更新病歷，避免反覆補問。本規則為 prompt 約定，模型遵守率仍需依實際模型驗收。
+
+Main Agent 對 (c) 提醒待逐項補問，是否啟動問診仍依醫師即時指令與使用習慣。Information Collection 補問時須逐項採用中性問法，不以「這些都沒有嗎？」或「這些都有嗎？」等引導式全稱問句取代確認；既有明確全稱回答的辨識例外仍保留。Record 收到明確後續答案時，更新已釐清症狀的狀態與來源，移除該項已失效的待確認字樣，其餘未釐清症狀維持未知；資訊獲得釐清本身不代表病情變化。
+
+已知模型遵守限制：mini 先前的 F 情境（「有沒有 A、B、C？—沒有」）實測曾被書寫模型展開為逐項陰性，且幻覺審查放行。本專案 LC 第 2.4 節提供額外辨識這類過度展開的機會，但同樣依賴模型判斷；下述小樣本實測仍有漏標，不能視為保證攔截。更換模型後應重測部分回答與全稱確認情境，包含明確全稱陽性（「這些都有嗎？—對」），並驗證書寫、審查及低信心掃描的實際結果。
+
+部分回答的模型實測紀錄（來源：使用者提供的另一個 AI 測試報告；本次文件更新未重跑測試，也未核對原始腳本與逐次輸出）：模型為 `qwen3.8-27b`，新版 prompt 六種情境各 5 次、含低信心掃描，共 30 次寫病歷；舊版對照為報告當時 `git HEAD` 的 F、G 各 5 次，共 10 次。報告未提供溫度、隨機種子、基準 commit SHA 等完整重現資訊。以下保留每情境全部嘗試作為分母，分列寫法不符、解析失敗與未寫入。
+
+| 情境 | 預期 | 新版結果（各 5 次） |
+| --- | --- | --- |
+| E：「這些全部都沒有嗎？—對」 | 逐項陰性 | 5 次符合；LC 未誤標 |
+| F：「有沒有胸痛、心悸或呼吸困難？—沒有」 | 未知 (c) | 1 次符合；4 次展開為逐項否認 |
+| G：「這些都沒有嗎？—嗯」 | 未知 (c) | 4 次符合且 LC 標註；1 次 JSON 解析失敗 |
+| H：「這些都沒有嗎？—沒有」 | 逐項陰性 | 3 次符合；1 次寫成 (c)；1 次沒有修改操作、未寫入 |
+| 補問後全部釐清 | 更新狀態、移除待確認、不誤寫成病情變化 | 4 次符合且 R3～R5 來源正確；1 次 JSON 解析失敗 |
+| 補問後只釐清一項 | 已釐清項更新，其餘保留 (c) | 5 次符合，未一併推定其餘症狀 |
+
+F 的 4 次逐項否認均被幻覺審查放行，LC 只標出其中 1 次（1/4）；此比例僅指已過度展開結果的標註，不是整體 F 的規則符合率。H 的 3 次逐項陰性均被 LC 以「無法歸因」標註，與既定例外不符。「這些都沒有嗎？—沒有」仍按明確全稱確認處理，Record、幻覺審查與 LC 的例外均保留；此次誤標不構成刪除該例外的理由。
+
+舊版對照：F 有 3 次成功寫入，均為逐項否認，另 2 次 JSON 解析失敗；G 有 2 次成功寫入，均將「嗯」展開為逐項否認，另 3 次 JSON 解析失敗。新版 G 支持新增 (c) 可改善含糊附和的處理，F 則仍有明確缺口。各情境僅 5 次且兩組解析失敗率不同，不足以證明整體穩定度沒有退步，也不能據此斷言舊 prompt 完全無法涵蓋這類情境。
+
+新版共 2/30 次 JSON 解析失敗，另有 H 的 1/30 次未寫入；舊版對照為 5/10 次 JSON 解析失敗。報告將解析失敗歸因於 JSON 字串含未跳脫的原始 TAB，此歸因尚未經本次原始輸出核對，應獨立追蹤。報告觀察到這些失敗未改動病歷，不代表已驗證所有失敗路徑。補問後兩個情境支持 Record 能處理後續釐清；報告不足以確認主 Agent 的問診啟動時機與 Information Collection 的實際中性提問方式已通過端到端驗證。此次結果可作為接受已知限制後提交 prompt 改善的依據，不代表模型遵守率已驗收通過。
+
 合法來源標籤：
 
 - `[問診紀錄_患者R{N}]`
@@ -1036,6 +1081,7 @@ professor_*/parent_map.jsonl
 正式部署建議：
 
 - API key 改用環境變數或 secret manager。
+- 預設綁定 `0.0.0.0:8080` 且沒有登入驗證，區網內任何裝置都能存取患者資料；只在本機使用時請設 `TCM_HOST=127.0.0.1`，其餘情況務必在前面加上驗證與 HTTPS。
 - 加入身份驗證與 HTTPS。
 - 定義患者資料保存與刪除政策。
 - 定義 log 保存期限與存取權限。
@@ -1047,6 +1093,9 @@ professor_*/parent_map.jsonl
 功能驗收：
 
 - App 可在 port 8080 啟動。
+- 全新環境雙擊 `install.cmd` 可完成安裝（建立 `.venv`、複製 `config.json`、健檢無 FAIL）；重跑時沿用既有 `.venv` 與 `config.json`，且不覆蓋已修改的 `config.json`。
+- 雙擊 `start.cmd` 可啟動並開啟瀏覽器；沒有 `.venv` 時提示先執行 install。直接執行 `python TCM_Meridian_main.py` 仍使用 reload。
+- `tools/doctor.py` 在 `config.json` 仍是佔位符時列出 WARN、在套件缺失或 `config.json` 無法解析時以 FAIL 結束。
 - 可建立、選取、更新、刪除患者。
 - 可建立、載入、從舊 session 複製、刪除 session。
 - 新建空 NOTE/A&T、保存 NOTE/A&T 與保存 `patient_info.json` 使用原子寫入流程；從舊 session 複製 NOTE/A&T 模板時使用一般檔案複製。

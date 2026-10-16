@@ -226,6 +226,11 @@ class SpeakerService:
         self._restored = restored
         self._restored_trusted = bool(trusted)
 
+    def rebind(self, caller: LLMCaller, endpoint: Callable[[], Endpoint]):
+        """Use the model caller and endpoint of the run that starts now (they follow the settings in force)."""
+        self.caller = caller
+        self._endpoint = endpoint
+
     def resume(self):
         """Recording starts again in the same run (stop, then start): marking goes on with the voice groups and the role map it had."""
         if self.failed or self.frozen:

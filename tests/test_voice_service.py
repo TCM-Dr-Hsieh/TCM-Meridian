@@ -320,3 +320,56 @@ async def test_a_page_loaded_in_the_middle_of_a_recording_can_still_open_the_win
         assert manager.session.state == 'idle'
     finally:
         await manager.shutdown()
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Review findings: the recording clock of a session that is not loaded, and a continued recording's speaker settings
+# ---------------------------------------------------------------------------------------------------------------------
+async def test_the_recording_position_of_a_session_that_is_not_loaded_comes_from_its_file(patient):
+    from pathlib import Path
+    first = make_manager()
+    first.attach(patient, DATE)
+    await record(first, 7)
+    restarted = make_manager()                       # the program was restarted, or a page reloaded: nothing is attached yet
+    assert restarted.session is None
+    assert restarted.recording_position(patient, DATE) == (7.0, True)
+    assert restarted.recording_position(patient, '2026-01-01') == (None, False)       # no recording that day
+    assert restarted.recording_position('', DATE) == (None, False)
+    other = Path(patient).with_name('B456_1990-02-02_李')
+    other.mkdir()
+    restarted.attach(str(other), DATE)               # another session is loaded: the answer is still about the one asked for
+    assert restarted.recording_position(patient, DATE) == (7.0, True)
+    assert restarted.recording_position(str(other), DATE) == (None, False)
+
+
+async def test_a_continued_recording_follows_the_speaker_settings_in_force_now(patient):
+    from tests.speaker_fakes import FakeEmbedder, bases
+    settings = make_settings()
+    settings.speaker.enabled = True
+    manager = make_manager(settings=settings)
+    manager.speaker_embedder = lambda path: FakeEmbedder(bases(2))
+    manager.load_config = lambda: {'voice_config': settings.to_dict()}
+    manager.attach(patient, DATE)
+    await record(manager, 4)
+    first = manager.session.speaker
+    assert first is not None and first.settings.unknown_percentile == 15.0
+    # unchanged marking settings: the same service goes on (its voice groups are still there), with the model endpoint now in force
+    settings.corrector.api_url = 'http://other.invalid/v1'
+    await record(manager, 4)
+    assert manager.session.speaker is first and first._endpoint().api_url == 'http://other.invalid/v1'
+    # changed settings: a new service with the new numbers, used by the session and by the transcript
+    settings.speaker.unknown_percentile = 40.0
+    settings.speaker.use_in_jobs = False
+    await record(manager, 4)
+    second = manager.session.speaker
+    assert second is not first and second.settings.unknown_percentile == 40.0 and second.settings.use_in_jobs is False
+    assert manager.session.pipeline.speaker is second
+    # switched off: the old service keeps what it marked but marks nothing more
+    settings.speaker.enabled = False
+    await record(manager, 4)
+    assert second.frozen and manager.session.pipeline.speaker is second and manager.session.speaker is second
+    # and on again: a new service takes over, the earlier marks are carried along
+    settings.speaker.enabled = True
+    await record(manager, 4)
+    third = manager.session.speaker
+    assert third is not second and not third.frozen and manager.session.pipeline.speaker is third

@@ -239,10 +239,20 @@ class VoiceSession:
         self.speaker_note = ''
         previous = self.speaker
         if not config.enabled:
+            if previous is not None and not previous.frozen:
+                # Marking was switched off since the last run of this transcript: the marks it made stay (shown, handed to the
+                # prompts as they were), but it must not mark anything new, so it becomes a display-only service.
+                await previous.stop()
+                previous.frozen = True
             return None
-        if previous is not None and not previous.frozen and not previous.failed:
-            previous.resume()                       # stop, then start in the same run: the voice groups and role map are still there
+        if previous is not None and not previous.frozen and not previous.failed and previous.settings == config:
+            # Stop, then start in the same run with the same settings: the voice groups and role map are still there. The model
+            # endpoint, its timeout and retries may have changed in between, so the service gets the new caller.
+            previous.rebind(caller, lambda: settings.corrector)
+            previous.resume()
             return previous
+        if previous is not None and not previous.frozen:
+            await previous.stop()                   # settings changed: the old service ends; its labels carry over, its voice groups do not
         try:
             embed = await asyncio.to_thread(self.manager.speaker_embedder, resolve_path(config.model_path))
         except Exception as exc:
@@ -512,7 +522,13 @@ class VoiceManager:
         """(seconds recorded so far, paused). `None` seconds = this session has no recording. The clock only grows (the file is
         appended to), so it orders a manual edit against the transcript lines: an edit is later than every line before it."""
         if folder is not None and not self.matches(folder, date):
-            return None, False
+            # Not the loaded session (after a restart, or a page reloaded before its voice window was opened): the recording of that
+            # session is still its file. Without this a version made now would get "no recording yet", and a reviewer could take
+            # the earlier transcript lines for evidence that appeared after the edit.
+            if not folder or not date:
+                return None, False
+            samples = sample_count(voice_paths(folder, date).audio)
+            return (samples / RATE, True) if samples else (None, False)
         session = self.session
         if session is None:
             return None, False

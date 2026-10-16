@@ -146,7 +146,11 @@ class HallucinationSubagent:
         if previous_content is not None:
             delta = "\n".join(difflib.unified_diff(
                 previous_content.splitlines(), content.splitlines(), fromfile="修改前", tofile="即將登載", lineterm="", n=1))
-            delta_section = f"\n## 【本次更新的改動（`-` 修改前、`+` 即將登載）】\n```diff\n{delta or '（沒有改動）'}\n```\n"
+            delta_section = (
+                "\n## 【本次更新的改動（`-` 修改前、`+` 即將登載）】\n"
+                "（diff 只列出有改動的行與緊鄰的前後各 1 行；沒有列出的內容，這次沒動）\n"
+                f"```diff\n{delta or '（沒有改動）'}\n```\n"
+            )
         guidelines_section = (
             f"\n## 【本次登載方針（病歷登載助理收到的指示）】\n{update_guidelines}\n" if update_guidelines else ""
         )

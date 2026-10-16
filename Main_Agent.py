@@ -876,6 +876,7 @@ class MainAgent:
         if rec_clock is not None:
             self.rec_clock = rec_clock
         self._last_note_update_guidelines = s.get("update_guidelines", "")        # 本主輪登載方針的範圍，隨暫停狀態存檔／還原
+        self._loaded_files = [dict(entry) for entry in s.get("loaded_files", [])]  # 本主輪已讀的檔案：審查與低信心標註要靠它核實引用
 
         def _log(msg: str):
             if log_callback:
@@ -1360,6 +1361,7 @@ class MainAgent:
                     "original_note": original_note,
                     "original_at": original_at,
                     "update_guidelines": self._last_note_update_guidelines,
+                    "loaded_files": [dict(entry) for entry in self._loaded_files],
                 }
                 if self._active_turn:
                     self._active_turn["status"] = "waiting_for_interview"
@@ -1537,6 +1539,7 @@ class MainAgent:
                         "original_note": original_note,
                         "original_at": original_at,
                         "update_guidelines": self._last_note_update_guidelines,
+                        "loaded_files": [dict(entry) for entry in self._loaded_files],
                     }
                     if self._active_turn:
                         self._active_turn["status"] = "waiting_for_interview"

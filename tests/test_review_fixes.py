@@ -172,6 +172,7 @@ def test_the_reviewer_sees_what_this_update_changed_and_the_writer_supplies_the_
     user = reviewer.client.calls[-1]["messages"][1]["content"]
     assert "## 【本次更新的改動（`-` 修改前、`+` 即將登載）】" in user
     assert "-癸- Lab：\n+癸- Lab：HbA1c 7.3%[2026-10-16-Lab_data]" in user and "+甲- 現病史：頭痛三天" not in user
+    assert "沒有列出的內容，這次沒動" in user                               # the diff shows the changed lines only: far-away facts are untouched
     reviewer.review(field="note", content="same", previous_content="same")
     assert "（沒有改動）" in reviewer.client.calls[-1]["messages"][1]["content"]
     reviewer.review(field="note", content="x")                                             # an old caller: no section at all
@@ -358,3 +359,64 @@ def test_the_scope_of_the_update_survives_a_save_and_restore_during_the_intervie
     second._call_llm = lambda *args, **kwargs: next(after)
     done = second.continue_after_interview("", "問診完成", "血壓 128/82[人類醫師_T1]", "")
     assert done["reply"] == "好" and seen["update_guidelines"] == "局部更新：只更新血壓"
+
+
+def test_a_failed_call_while_asking_for_the_repair_keeps_what_the_first_answer_held():
+    def reply(kwargs):
+        if len(kwargs["messages"]) > 2:
+            raise ConnectionError("down")                               # the call that asks for the repair
+        return json.dumps(MIXED, ensure_ascii=False)
+
+    agent = lc(strength=1, rounds=1)
+    agent.client = fake_client(reply)
+    result = agent.execute(note_content=NOTE)
+    assert result["total_annotated"] == 1 and "**否認胸痛（只有家屬轉述）**" in result["annotated_note"]
+    assert result["incomplete"] is True and result["scan_errors"] == 1
+    assert len(result["skipped_items"]) == 1 and "過敏資訊遺漏" in result["skipped_items"][0]["item"]
+    # nothing found before the failure: a plain failed scan, as before
+    agent = lc(strength=1, rounds=1)
+    agent.client = fake_client(lambda kwargs: (_ for _ in ()).throw(ConnectionError("down")))
+    failed = agent.execute(note_content=NOTE)
+    assert failed["total_annotated"] == 0 and failed["skipped_items"] == [] and failed["incomplete"] is True and failed["scan_errors"] == 1
+
+
+def test_the_files_read_this_turn_survive_a_save_and_restore_during_the_interview(tmp_path):
+    from Main_Agent import MainAgent
+
+    (tmp_path / "Medical_information").mkdir()
+    (tmp_path / "Medical_information" / "2026-10-16-Lab_data.md").write_text("HbA1c 7.3%", encoding="utf-8")
+
+    def build():
+        return MainAgent(CONFIG, CONFIG, None, CONFIG, CONFIG)
+
+    first = build()
+    script = iter([
+        {"thinking": "t", "action": "read_patient_file", "action_input": "2026-10-16-Lab_data.md", "next_step": ""},
+        {"thinking": "t", "action": "information_collection_subagent", "action_input": "問頭痛", "next_step": ""},
+    ])
+    first._call_llm = lambda *args, **kwargs: next(script)
+    started = first.process_message("看檢驗", "", "", patient_folder=str(tmp_path), session_date="2026-10-17")
+    assert started["waiting_for_interview"] is True and len(first._loaded_files) == 1
+
+    second = build()                                                   # a new assistant, as after a restart
+    second.restore_state(json.loads(json.dumps(first.export_state())))
+    seen = {}
+
+    def spy(**kwargs):
+        seen.update(kwargs)
+        return {"success": True, "annotated_note": kwargs["note_content"], "total_rounds": 1, "total_annotated": 0, "all_phrases": [],
+                "scan_errors": 0, "skipped_items": [], "incomplete": False, "error": None}
+
+    second.lc_subagent.execute = spy
+    after = iter([
+        {"thinking": "t", "action": "low_confidence_check", "action_input": "", "next_step": ""},
+        {"thinking": "t", "action": "reply", "action_input": "好", "next_step": ""},
+    ])
+    second._call_llm = lambda *args, **kwargs: next(after)
+    second.continue_after_interview("", "問診完成", "檢驗：HbA1c 7.3%[2026-10-16-Lab_data]", "")
+    assert "HbA1c 7.3%" in seen["loaded_files_block"] and "2026-10-16-Lab_data.md" in seen["loaded_files_block"]
+    # the next main turn starts clean, as before
+    again = iter([{"thinking": "t", "action": "reply", "action_input": "嗨", "next_step": ""}])
+    second._call_llm = lambda *args, **kwargs: next(again)
+    second.process_message("下一輪", "", "", patient_folder=str(tmp_path), session_date="2026-10-17")
+    assert second._loaded_files == []

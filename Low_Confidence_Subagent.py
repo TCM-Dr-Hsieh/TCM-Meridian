@@ -324,6 +324,9 @@ class LowConfidenceSubagent:
                     break
                 continue
             consecutive_errors = 0
+            if check_result.get("repair_error"):
+                scan_errors += 1
+                _log(f"[LC 第 {lc_round} 輪] {check_result['repair_error']}；已找到的合格片段保留，不合格項記為未標註")
             for item in check_result.get("invalid_items", []):
                 skipped_items.append({"round": lc_round, "item": item})
                 _log(f"[LC 第 {lc_round} 輪] 有一個發現格式不合、無法標註：{item}")
@@ -581,6 +584,8 @@ class LowConfidenceSubagent:
                 raw_output = (resp.choices[0].message.content or "").strip()
             except Exception as e:
                 _log(f"[LC] LLM 呼叫失敗: {e}")
+                if best is not None:          # the first answer already held valid marks: keep them, and say the repair could not be asked
+                    return {**best, "repair_error": f"請模型補齊時 LLM 呼叫失敗：{e}"}
                 return {"intercept": "error", "phrases": [], "error": f"LLM 呼叫失敗：{e}"}
 
             _log(f"\n[LC 第 {round_num} 輪 LLM 輸出]")

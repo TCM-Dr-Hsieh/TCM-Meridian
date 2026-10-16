@@ -26,6 +26,9 @@ def _snapshot_label(index: int, snapshot: dict[str, Any], with_recording: bool =
     parts = [source]
     if timestamp:
         parts.append(timestamp)
+    if snapshot.get("after_turn") is not None:
+        after = int(snapshot["after_turn"])
+        parts.append(f"第 {after} 主輪之後" if after > 0 else "尚無任何主輪")
     if with_recording:
         parts.append(_recording_note(snapshot))
     return f"版本 {index}（{', '.join(parts)}）"

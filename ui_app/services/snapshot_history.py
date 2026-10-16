@@ -20,9 +20,12 @@ class SnapshotHistory:
         rec_t: float | None = None,
         rec_paused: bool = False,
         meta: dict | None = None,
+        after_turn: int | None = None,
     ) -> list[dict]:
         """Add a version. `rec_t` is the recording clock (seconds recorded so far in this session) when the version was made:
         it orders the version against the voice transcript. None = this session had no recording yet.
+        `after_turn`: how many Main Agent turns had been started when a physician edited by hand (0 = none yet): the edit lies after
+        that turn and before the next one, which orders it against the interview rounds and the agents' own versions (`Turn X-Y`).
         `meta`: what a physician edit took away (`removed_tags`, `dropped_marks`), kept with the version for the audit and the diff."""
         truncated = self.snapshots[self.current_index + 1 :]
         self.snapshots = self.snapshots[: self.current_index + 1]
@@ -39,6 +42,8 @@ class SnapshotHistory:
                 snapshot["rec_paused"] = True
         if meta:
             snapshot["meta"] = meta
+        if after_turn is not None:
+            snapshot["after_turn"] = int(after_turn)
         self.snapshots.append(snapshot)
         self.current_index = len(self.snapshots) - 1
         return truncated

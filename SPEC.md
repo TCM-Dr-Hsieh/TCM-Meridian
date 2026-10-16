@@ -1180,6 +1180,7 @@ professor_*/parent_map.jsonl
 - `SessionBusyGuard(include_voice=True)` 在錄音進行中擋下切換／退出患者、切換日期、刪除 session、摘要並退出、修改患者資料；不擋 Agent 訊息與病歷編輯（`voice_busy()` 讀共用管理器）。
 - 每個主輪開始時取一份凍結的逐字稿快照（`VoiceManager.snapshot_text`），整輪沿用；問診結束後接續（`continue_after_interview`）取新的。逐字稿接在「完整問診對話紀錄」之後，注入 Main、Record、Hallucination、低信心標註、病歷檢查員；不注入問診助理與教授。
 - 版本快照帶 `rec_t`（錄音時鐘：這個 session 已錄下的音訊秒數，只增不減；`None` = 從未錄音）與 `rec_paused`；「病歷修改 diff 過程」的版本標示顯示 `@錄音 mm:ss`（無錄音的 session 完全不顯示，錄音前的版本標「尚未錄音」），讓 Agent 判斷修改與逐字稿的先後。
+- 先後以 Main Agent 的主輪編號（`turn_count`）為準：人工修改版本記錄 `after_turn`（修改當下已開始的主輪數，0 = 尚無主輪），diff 版本標示顯示「第 N 主輪之後」；Agent 寫入的版本標示 `Turn X-Y update_record`；問診回合標頭帶 `Turn T`（`＜第3回合(R3，Turn 2)…＞`，由啟動該次問診的主輪決定——問診一律由 Main Agent 啟動並在同一主輪續跑，舊 session 沒有此欄位則不顯示）；當輪讀取的檔案只存在於當輪，必然晚於版本歷史中所有人工修改（Agent 執行期間不可能有人工修改）。審查員比較 T 與 N 判斷來源在修改之前或之後。
 - 智能體互動行為新增第 8 欄 `voice_subagent`，記錄錄音開始／停止、錯誤與校稿呼叫。
 
 ### 17.4 來源標籤與 prompt

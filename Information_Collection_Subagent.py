@@ -203,6 +203,7 @@ class InformationCollectionSubagent:
             "role": "patient",
             "content": patient_input,
             "round": self.dialogue_round,
+            "turn": self.current_turn,
         }
         self.conversation.append(patient_msg)
         self.all_conversations.append(patient_msg)
@@ -280,6 +281,7 @@ class InformationCollectionSubagent:
         self.conversation = []
         self.all_conversations = []
         self.dialogue_round = 0
+        self.current_turn: int | None = None            # the Main Agent turn that started this interview (set by the UI)
         self.turn_count = 0
         self.turn_history = []
         self.guidelines = ""
@@ -603,6 +605,7 @@ ASSESSMENT & TREATMENT:
                 "role": "subagent",
                 "content": action_input,
                 "round": self.dialogue_round,
+                "turn": self.current_turn,
             }
             self.conversation.append(subagent_msg)
             self.all_conversations.append(subagent_msg)

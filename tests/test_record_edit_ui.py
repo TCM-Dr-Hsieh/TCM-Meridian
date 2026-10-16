@@ -268,3 +268,35 @@ def test_a_recording_that_began_after_the_last_version_still_marks_every_version
     assert "尚未錄音" not in plain and "@錄音" not in plain      # no transcript, no recording: no clock
     with_transcript = build_record_diff_context(history.snapshots, history.current_index, has_recording=True)
     assert with_transcript.count("尚未錄音") >= 2 and "@錄音" not in with_transcript
+
+
+def test_a_manual_edit_is_stamped_with_the_main_turns_so_far_and_the_diff_says_so():
+    h = make()
+    h.c.app_state["agent_instance"] = SimpleNamespace(turn_count=3)
+    h.c.on_edit_mode()
+    h.refs["note_editor"].value = "改過的內容"
+    h.c.on_edit_done()
+    assert h.history.get_current()["after_turn"] == 3
+    text = build_record_diff_context(h.history.snapshots, h.history.current_index)
+    assert "第 3 主輪之後" in text
+    # no agent yet in this session: no turn has run
+    fresh = make()
+    fresh.c.on_edit_mode()
+    fresh.refs["note_editor"].value = "又一個內容"
+    fresh.c.on_edit_done()
+    assert fresh.history.get_current()["after_turn"] == 0
+    assert "尚無任何主輪" in build_record_diff_context(fresh.history.snapshots, fresh.history.current_index)
+    # a version nobody stamped (the AI's own, old sessions) shows nothing of the kind
+    assert "主輪之後" not in build_record_diff_context(make().history.snapshots, 0)
+
+
+def test_interview_rounds_carry_the_main_turn_that_started_them_when_it_is_known():
+    from ui_app.rendering import format_interview_conversations
+    text = format_interview_conversations([
+        {"role": "subagent", "content": "哪裡不舒服？", "round": 1, "turn": 2},
+        {"role": "patient", "content": "頭痛", "round": 1, "turn": 2},
+        {"role": "subagent", "content": "多久了？", "round": 2},                # an old session: no turn recorded
+        {"role": "patient", "content": "三天", "round": 2, "turn": None},
+    ])
+    assert "＜第1回合(R1，Turn 2)助理提問＞：哪裡不舒服？" in text and "＜第1回合(R1，Turn 2)收到回應＞：頭痛" in text
+    assert "＜第2回合(R2)助理提問＞：多久了？" in text and "＜第2回合(R2)收到回應＞：三天" in text

@@ -57,6 +57,14 @@ class MedicalRecordController:
             return MIN_SURVIVING_RUN
         return value if 1 <= value <= 20 else MIN_SURVIVING_RUN
 
+    def _main_turns_so_far(self) -> int:
+        """How many Main Agent turns this session has had (0 when there is no agent yet: no turn has run)."""
+        agent = self.app_state.get("agent_instance")
+        try:
+            return max(0, int(getattr(agent, "turn_count", 0) or 0))
+        except (TypeError, ValueError):
+            return 0
+
     def _recording_position(self) -> tuple[float | None, bool]:
         """(seconds recorded so far in this session, paused) -- (None, False) when the session has no voice recording."""
         manager = self.app_state.get("_voice_manager")
@@ -295,7 +303,8 @@ class MedicalRecordController:
             if dropped:
                 meta["dropped_marks"] = dropped
             truncated = self.history.push(
-                new_note, new_at, source="人類修改", rec_t=rec_t, rec_paused=rec_paused, meta=meta or None
+                new_note, new_at, source="人類修改", rec_t=rec_t, rec_paused=rec_paused, meta=meta or None,
+                after_turn=self._main_turns_so_far(),
             )
             if truncated:
                 fp = self.app_state["selected_patient_folder"]

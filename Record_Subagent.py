@@ -460,6 +460,8 @@ class RecordSubagent:
         # 提取操作
         operations = parsed.get("operations", [])
         thinking = parsed.get("thinking", "")
+        # 給主治醫師的提醒（選填）：登載助理在局部更新時看到的、依規定不自行寫入的安全相關資訊
+        notes_for_main = str(parsed.get("notes_for_main") or "").strip()
 
         _log(f"[Record Subagent] ══ 解析結果 ══")
         _log(f"[Record Subagent] thinking: {thinking}")
@@ -479,6 +481,7 @@ class RecordSubagent:
                 "review_result": "跳過",
                 "review_rounds": 0,
                 "review_comment": "",
+                "notes_for_main": notes_for_main,
             }
 
         # 套用操作（嚴格驗證：任一操作不合法則整批退回，不寫入）
@@ -575,6 +578,8 @@ class RecordSubagent:
 
             review_result = self.hallucination_reviewer.review(
                 field=target_field,
+                update_guidelines=guidelines,
+                previous_content=target_content,
                 content=review_content,
                 conversation_history=conversation_history,
                 last_visit_block=last_visit_block,
@@ -624,6 +629,7 @@ class RecordSubagent:
                         "review_result": "通過",
                         "review_rounds": review_round,
                         "review_comment": reviewer_comment,
+                        "notes_for_main": notes_for_main,
                     }
                 else:
                     # 尚未達到檢測強度，繼續下一輪審查（不重寫）
@@ -747,6 +753,9 @@ class RecordSubagent:
                 if json_match:
                     try:
                         rewrite_parsed = json.loads(json_match.group())
+                        rewrite_note = str(rewrite_parsed.get("notes_for_main") or "").strip()
+                        if rewrite_note:
+                            notes_for_main = rewrite_note
                         rewrite_ops = rewrite_parsed.get("operations", [])
                         if rewrite_ops:
                             rw_ok, rw_content, rewrite_logs, rw_failures = apply_operations(

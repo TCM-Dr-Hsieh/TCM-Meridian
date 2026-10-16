@@ -1244,6 +1244,8 @@ class MainAgent:
                     ops_summary = f"成功執行 {len(sub_result['operations'])} 個操作"
                     review_info = f"(審查: {sub_result.get('review_result', '?')}, {sub_result.get('review_rounds', 0)}輪)"
                     step_record["result"] = f"{ops_summary} {review_info}"
+                    if sub_result.get("notes_for_main"):
+                        step_record["result"] += f"；病歷登載助理提醒：{sub_result['notes_for_main']}"
                     if current_note != before_note or current_at != before_at:
                         record_snapshots.append({
                             "note": current_note,
@@ -1386,6 +1388,12 @@ class MainAgent:
                                 f"完成低信心標註，共 {lc_result['total_rounds']} 輪，"
                                 f"標註 {lc_result['total_annotated']} 個片段"
                             )
+                            if lc_result.get("incomplete"):
+                                step_record["result"] = (
+                                    f"低信心標註未完成：掃描時模型呼叫或輸出解析失敗 {lc_result.get('scan_errors', 0)} 次，"
+                                    f"已跑 {lc_result['total_rounds']} 輪、標註 {lc_result['total_annotated']} 個片段。"
+                                    "這不代表 NOTE 沒有低信心內容，請在回覆中明確告訴醫師低信心標註沒有完成"
+                                )
                             if current_note != before_note:
                                 record_snapshots.append({
                                     "note": current_note,

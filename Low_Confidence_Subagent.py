@@ -65,6 +65,28 @@ def _replace_first_unbolded(text: str, original: str, replacement: str) -> tuple
         start = index + len(original)
 
 
+def _replace_occurrence(text: str, original: str, replacement: str, occurrence: int) -> tuple[str, str]:
+    """Like `_replace_first_unbolded`, for the phrase that stands in several places and is only doubtful in one of them:
+    `occurrence` is which one (1-based, top to bottom, places already in bold counted)."""
+    if not original:
+        return text, "not_found"
+    start = 0
+    seen = 0
+    while True:
+        index = text.find(original, start)
+        if index < 0:
+            return text, "not_found"
+        seen += 1
+        end = index + len(original)
+        if seen == occurrence:
+            if _inside_bold_span(text, index):
+                return text, "already_tagged"
+            if _overlaps_citation_tag(text, index, end):
+                return text, "citation_tag"
+            return text[:index] + replacement + text[end:], "replaced"
+        start = end
+
+
 # ════════════════════════════════════════════════════════════════
 # Low Confidence Subagent
 # ════════════════════════════════════════════════════════════════
@@ -238,6 +260,8 @@ class LowConfidenceSubagent:
         citation_tag_summary = ""
         lc_pass_count = 0
         lc_round = 0
+        scan_errors = 0                  # rounds in which the model call or its output failed: not a "pass", the check did not happen
+        consecutive_errors = 0
 
         _log(f"\n{'='*60}")
         _log(f"[LC Subagent] 開始迭代掃描（至多 {self.max_scan_rounds} 輪，檢測強度 {self.detection_strength}）")
@@ -265,6 +289,16 @@ class LowConfidenceSubagent:
             intercept = check_result.get("intercept", "pass")
             round_phrases = check_result.get("phrases", [])
 
+            if intercept == "error":
+                scan_errors += 1
+                consecutive_errors += 1
+                _log(f"[LC 第 {lc_round} 輪] 掃描失敗（{check_result.get('error', '?')}），不算通過")
+                if consecutive_errors >= 2:
+                    _log("[LC] 連續 2 輪掃描失敗，停止掃描")
+                    break
+                continue
+            consecutive_errors = 0
+
             # 標註替換
             round_annotated = 0
             replacement_results: dict[int, str] = {}
@@ -274,7 +308,11 @@ class LowConfidenceSubagent:
                 replacement_status = "not_found"
                 if original:
                     annotated = f"**{original}（{reason}）**"
-                    current_note, replacement_status = _replace_first_unbolded(current_note, original, annotated)
+                    occurrence = phrase_info.get("occurrence")
+                    if isinstance(occurrence, int) and not isinstance(occurrence, bool) and occurrence >= 1:
+                        current_note, replacement_status = _replace_occurrence(current_note, original, annotated, occurrence)
+                    else:
+                        current_note, replacement_status = _replace_first_unbolded(current_note, original, annotated)
                 if replacement_status == "replaced":
                     round_annotated += 1
                 replacement_results[id(phrase_info)] = replacement_status
@@ -372,12 +410,17 @@ class LowConfidenceSubagent:
                     f"\"{item['original_phrase']}\" → {item['reason']}"
                 )
 
+        # A round that failed is not a round that found nothing: if the scan never reached the passes it needs and some round failed, the
+        # check is incomplete (what was marked before the failure is kept) and the caller must say so, not report "done".
+        incomplete = scan_errors > 0 and lc_pass_count < self.detection_strength
         return {
             "success": True,
             "annotated_note": current_note,
             "total_rounds": lc_round,
             "total_annotated": total_annotated,
             "all_phrases": all_phrases,
+            "scan_errors": scan_errors,
+            "incomplete": incomplete,
             "error": None,
         }
 
@@ -490,7 +533,7 @@ class LowConfidenceSubagent:
                 raw_output = (resp.choices[0].message.content or "").strip()
             except Exception as e:
                 _log(f"[LC] LLM 呼叫失敗: {e}")
-                return {"intercept": "pass", "phrases": []}
+                return {"intercept": "error", "phrases": [], "error": f"LLM 呼叫失敗：{e}"}
 
             _log(f"\n[LC 第 {round_num} 輪 LLM 輸出]")
             _log(raw_output[:5000] + ("..." if len(raw_output) > 5000 else ""))
@@ -544,6 +587,6 @@ class LowConfidenceSubagent:
                     f"第 {attempt + 1} 次重試..."
                 )
             else:
-                _log("[LC] JSON 解析失敗，已達重試上限，回傳 pass")
+                _log("[LC] JSON 解析失敗，已達重試上限，本輪視為掃描失敗")
 
-        return {"intercept": "pass", "phrases": []}
+        return {"intercept": "error", "phrases": [], "error": "輸出無法解析為 JSON"}

@@ -104,3 +104,25 @@ def test_the_reviewing_prompts_make_the_model_compare_the_source_step_with_the_e
         text = read(name)
         assert "版本 N 的先後" in text, name
         assert "逐一檢查" in text and "X > N 者晚於這次修改" in text and "先比 X，X 相同再比 Y" in text and "寫在你的 thinking 裡" in text, name
+
+
+def test_the_review_contract_fixes_are_in_the_prompts():
+    three = ("record", "hallucination", "lc")
+    for name in three:
+        text = read(name)
+        assert "不加來源標籤，也不得為了湊標籤而虛構標籤" in text, name                    # process-type unknowns (a)(d)
+        assert "程度或頻率的描述（稍微、輕微、偶有、有時）不算不確定" in text, name      # degree words are not uncertainty
+        assert "「稍微口乾」、「偶有胸悶」、「疑為" not in text, name
+    record = read("record")
+    assert "### 更新範圍：局部更新與全面整併" in record and "notes_for_main" in record
+    assert "### 既有的低信心警示" in record and "不需要、也不可替它加來源標籤" in record
+    hallucination = read("hallucination")
+    assert "### 重要：登載方針決定遺漏檢查的範圍" in hallucination and "【本次更新的改動】" in hallucination
+    assert "出現在【本次更新的改動】`+` 行裡的檔案事實" in hallucination and "忠實揭示的不確定性" in hallucination
+    lc = read("lc")
+    assert "你不會收到討論區內容" in lc and "`occurrence`（選填，整數）" in lc and "最近的欄位標題" in lc
+    assert "不得提醒補回" in read("nr")
+    main = read("main")
+    assert "局部更新：只更新血壓，其餘內容不動" in main and "低信心標註未完成" in main
+    assert "稍微口乾" not in main
+    assert "方針範圍與症狀追問的分工" in read("prompt_information_collection_subagent.txt")

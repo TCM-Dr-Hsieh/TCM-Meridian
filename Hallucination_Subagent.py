@@ -4,6 +4,7 @@ Hallucination_Subagent.py - 幻覺與過度聲稱審查員 (Hallucination & Over
 """
 from __future__ import annotations
 
+import difflib
 import json
 import os
 import re
@@ -79,6 +80,8 @@ class HallucinationSubagent:
         record_diff_context: str = "",
         forum_history: str = "",
         loaded_files_block: str = "",
+        update_guidelines: str = "",
+        previous_content: str | None = None,
         image_files: list | None = None,
         log_callback: Optional[Callable[[str], None]] = None,
         behavior_context: dict | None = None,
@@ -89,6 +92,8 @@ class HallucinationSubagent:
         Args:
             field: 欄位名（"note" 或 "assessment_&_treatment"）
             content: 即將寫入的病歷內容
+            previous_content: 這次更新之前的欄位內容；給了就附上「修改前 → 即將登載」的改動，審查者據此分辨哪些是這次新增或改寫的
+            update_guidelines: 病歷登載助理收到的本次登載方針（決定這次是局部更新還是全面整併，審查的遺漏範圍依它）
             conversation_history: 人類醫師與 AI 主治醫師的互動過程
             last_visit_block: 上次就診病歷內容
             history_summary: 歷史病歷摘要
@@ -137,12 +142,20 @@ class HallucinationSubagent:
 """
 
         record_diff_text = record_diff_context or "## 【病歷修改 diff 過程】\n（無病歷版本歷史）"
+        delta_section = ""
+        if previous_content is not None:
+            delta = "\n".join(difflib.unified_diff(
+                previous_content.splitlines(), content.splitlines(), fromfile="修改前", tofile="即將登載", lineterm="", n=1))
+            delta_section = f"\n## 【本次更新的改動（`-` 修改前、`+` 即將登載）】\n```diff\n{delta or '（沒有改動）'}\n```\n"
+        guidelines_section = (
+            f"\n## 【本次登載方針（病歷登載助理收到的指示）】\n{update_guidelines}\n" if update_guidelines else ""
+        )
 
         user_prompt = f"""## 【即將登載的病歷更新】
 欄位：{field}
 內容：
 {content}
-{record_diff_text}
+{delta_section}{guidelines_section}{record_diff_text}
 {conversation_section}{interview_section}{voice_section}{forum_section}{loaded_files_section}
 請根據以上資訊，進行幻覺與過度聲稱審查。輸出 JSON。"""
 

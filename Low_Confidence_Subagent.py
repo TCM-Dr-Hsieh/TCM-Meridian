@@ -41,50 +41,62 @@ def _overlaps_citation_tag(text: str, start: int, end: int) -> bool:
     return any(start < tag_end and end > tag_start for tag_start, tag_end in _citation_tag_spans(text))
 
 
-def _replace_first_unbolded(text: str, original: str, replacement: str) -> tuple[str, str]:
-    if not original:
-        return text, "not_found"
+def _plan_replacements(note: str, phrases: list[dict]) -> tuple[dict[int, str], list[tuple[int, int, str]]]:
+    """Where each phrase of ONE scan round goes, resolved on the note exactly as the model saw it (not after the earlier phrases of the
+    round have been applied: their added reasons would shift the count of a later `occurrence`).
 
-    start = 0
-    found_in_bold = False
-    found_in_citation_tag = False
-    while True:
-        index = text.find(original, start)
-        if index < 0:
-            if found_in_citation_tag:
-                return text, "citation_tag"
-            return text, "already_tagged" if found_in_bold else "not_found"
-        if not _inside_bold_span(text, index):
+    A phrase without `occurrence` takes the first place that is not in bold, not across a source tag and not already taken by another
+    phrase of this round; with `occurrence` it takes that place (1-based, top to bottom, places in bold counted). Returns
+    ({id(phrase): status}, [(start, end, replacement)]) with status replaced | already_tagged | citation_tag | not_found."""
+    statuses: dict[int, str] = {}
+    claims: list[tuple[int, int, str]] = []
+
+    def taken(start: int, end: int) -> bool:
+        return any(start < claimed_end and end > claimed_start for claimed_start, claimed_end, _ in claims)
+
+    for info in phrases:
+        original = info.get("original_phrase", "")
+        if not original:
+            statuses[id(info)] = "not_found"
+            continue
+        replacement = f"**{original}（{info.get('reason', '')}）**"
+        occurrence = info.get("occurrence")
+        wanted = occurrence if isinstance(occurrence, int) and not isinstance(occurrence, bool) and occurrence >= 1 else None
+        start = 0
+        seen = 0
+        found_bold = found_tag = False
+        chosen: tuple[int, int] | None = None
+        while True:
+            index = note.find(original, start)
+            if index < 0:
+                break
             end = index + len(original)
-            if _overlaps_citation_tag(text, index, end):
-                found_in_citation_tag = True
-                start = end
+            start = end
+            seen += 1
+            if wanted is not None and seen != wanted:
                 continue
-            return text[:index] + replacement + text[index + len(original):], "replaced"
-        found_in_bold = True
-        start = index + len(original)
+            if _inside_bold_span(note, index) or taken(index, end):
+                found_bold = True
+            elif _overlaps_citation_tag(note, index, end):
+                found_tag = True
+            else:
+                chosen = (index, end)
+                break
+            if wanted is not None:
+                break
+        if chosen is not None:
+            claims.append((chosen[0], chosen[1], replacement))
+            statuses[id(info)] = "replaced"
+        else:
+            statuses[id(info)] = "citation_tag" if found_tag else ("already_tagged" if found_bold else "not_found")
+    return statuses, claims
 
 
-def _replace_occurrence(text: str, original: str, replacement: str, occurrence: int) -> tuple[str, str]:
-    """Like `_replace_first_unbolded`, for the phrase that stands in several places and is only doubtful in one of them:
-    `occurrence` is which one (1-based, top to bottom, places already in bold counted)."""
-    if not original:
-        return text, "not_found"
-    start = 0
-    seen = 0
-    while True:
-        index = text.find(original, start)
-        if index < 0:
-            return text, "not_found"
-        seen += 1
-        end = index + len(original)
-        if seen == occurrence:
-            if _inside_bold_span(text, index):
-                return text, "already_tagged"
-            if _overlaps_citation_tag(text, index, end):
-                return text, "citation_tag"
-            return text[:index] + replacement + text[end:], "replaced"
-        start = end
+def _apply_replacements(note: str, claims: list[tuple[int, int, str]]) -> str:
+    """Apply the planned replacements from the end of the note backwards, so no position moves before it is used."""
+    for start, end, replacement in sorted(claims, key=lambda claim: claim[0], reverse=True):
+        note = note[:start] + replacement + note[end:]
+    return note
 
 
 # ════════════════════════════════════════════════════════════════
@@ -166,6 +178,7 @@ class LowConfidenceSubagent:
         history_summary: str = "",
         record_diff_context: str = "",
         loaded_files_block: str = "",
+        update_guidelines: str = "",
         image_files: list | None = None,
         log_callback: Optional[Callable[[str], None]] = None,
         behavior_context: dict | None = None,
@@ -284,6 +297,7 @@ class LowConfidenceSubagent:
                 loaded_files_block=loaded_files_block,
                 behavior_context=behavior_context,
                 log_callback=log_callback,
+                update_guidelines=update_guidelines,
             )
 
             intercept = check_result.get("intercept", "pass")
@@ -299,23 +313,10 @@ class LowConfidenceSubagent:
                 continue
             consecutive_errors = 0
 
-            # 標註替換
-            round_annotated = 0
-            replacement_results: dict[int, str] = {}
-            for phrase_info in round_phrases:
-                original = phrase_info.get("original_phrase", "")
-                reason = phrase_info.get("reason", "")
-                replacement_status = "not_found"
-                if original:
-                    annotated = f"**{original}（{reason}）**"
-                    occurrence = phrase_info.get("occurrence")
-                    if isinstance(occurrence, int) and not isinstance(occurrence, bool) and occurrence >= 1:
-                        current_note, replacement_status = _replace_occurrence(current_note, original, annotated, occurrence)
-                    else:
-                        current_note, replacement_status = _replace_first_unbolded(current_note, original, annotated)
-                if replacement_status == "replaced":
-                    round_annotated += 1
-                replacement_results[id(phrase_info)] = replacement_status
+            # 標註替換：這一輪的所有位置先依「送給模型看的那份 NOTE」一次算好，再整批套用
+            replacement_results, claims = _plan_replacements(current_note, round_phrases)
+            current_note = _apply_replacements(current_note, claims)
+            round_annotated = len(claims)
 
             total_annotated += round_annotated
 
@@ -428,6 +429,17 @@ class LowConfidenceSubagent:
     # 內部方法
     # ════════════════════════════════════════════════════════════
 
+    @staticmethod
+    def _structure_problem(result) -> str:
+        """Why a parsed reply is not a usable scan answer ('' when it is): the keys and types the prompt asks for."""
+        if not isinstance(result, dict):
+            return "輸出不是 JSON 物件"
+        if not isinstance(result.get("low_confidence_phrases"), list):
+            return "缺少 low_confidence_phrases 陣列"
+        if str(result.get("intercept", "")).strip().lower() not in ("pass", "detected"):
+            return "intercept 不是 pass 或 detected"
+        return ""
+
     def _scan_round(
         self,
         current_note: str,
@@ -443,6 +455,7 @@ class LowConfidenceSubagent:
         behavior_context: dict | None = None,
         log_callback: Optional[Callable[[str], None]] = None,
         voice_transcript: str = "",
+        update_guidelines: str = "",
     ) -> dict[str, Any]:
         """
         執行一輪 LC 掃描。
@@ -476,6 +489,8 @@ class LowConfidenceSubagent:
 ## 【當輪讀取檔案暫存區】
 {loaded_files_block if loaded_files_block else '（空白）'}
 """
+        if update_guidelines:
+            user_prompt += f"\n## 【本輪病歷更新的登載方針】\n{update_guidelines}\n"
 
         # 非首輪時附加已標註與失敗摘要
         if round_num > 1:
@@ -549,44 +564,45 @@ class LowConfidenceSubagent:
                     meta={"attempt": attempt},
                 )
 
-            # 解析 JSON
+            # 解析 JSON，並驗證結構：缺必要欄位、型別不對、或給了片段卻沒有一個合格，都是「輸出不合規格」，不是「沒有問題」
+            problem = "輸出無法解析為 JSON"
             json_match = re.search(r'\{[\s\S]*\}', raw_output)
             if json_match:
                 try:
                     result = json.loads(json_match.group())
-                    phrases = result.get("low_confidence_phrases", [])
-                    intercept = str(
-                        result.get("intercept", "pass")
-                    ).strip().lower()
-
-                    # 驗證格式
-                    valid_phrases = [
-                        p for p in phrases
-                        if isinstance(p, dict)
-                        and "original_phrase" in p
-                        and "reason" in p
-                    ]
-
-                    # 自動修正 intercept 與 phrases 不一致
-                    if valid_phrases and intercept == "pass":
-                        intercept = "detected"
-                    if not valid_phrases and intercept == "detected":
-                        intercept = "pass"
-
-                    return {
-                        "intercept": intercept,
-                        "phrases": valid_phrases,
-                    }
                 except json.JSONDecodeError:
-                    pass
+                    result = None
+                if result is not None:
+                    problem = self._structure_problem(result)
+                    if not problem:
+                        phrases = result["low_confidence_phrases"]
+                        intercept = str(result["intercept"]).strip().lower()
+                        valid_phrases = [
+                            p for p in phrases
+                            if isinstance(p, dict)
+                            and isinstance(p.get("original_phrase"), str) and p["original_phrase"].strip()
+                            and isinstance(p.get("reason"), str)
+                        ]
+                        if phrases and not valid_phrases:
+                            problem = "low_confidence_phrases 裡沒有任何合格的片段（需要 original_phrase 與 reason）"
+                        else:
+                            # 自動修正 intercept 與 phrases 不一致
+                            if valid_phrases and intercept == "pass":
+                                intercept = "detected"
+                            if not valid_phrases and intercept == "detected":
+                                intercept = "pass"
+                            return {
+                                "intercept": intercept,
+                                "phrases": valid_phrases,
+                            }
 
-            # JSON 解析失敗
+            # 輸出不合規格：重試，最後視為掃描失敗
             if attempt < self.MAX_JSON_RETRIES:
                 _log(
-                    f"[LC] JSON 解析失敗，"
+                    f"[LC] {problem}，"
                     f"第 {attempt + 1} 次重試..."
                 )
             else:
-                _log("[LC] JSON 解析失敗，已達重試上限，本輪視為掃描失敗")
+                _log(f"[LC] {problem}，已達重試上限，本輪視為掃描失敗")
 
-        return {"intercept": "error", "phrases": [], "error": "輸出無法解析為 JSON"}
+        return {"intercept": "error", "phrases": [], "error": problem}

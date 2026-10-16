@@ -6,7 +6,8 @@ from types import SimpleNamespace
 import pytest
 
 from Hallucination_Subagent import HallucinationSubagent
-from Low_Confidence_Subagent import LowConfidenceSubagent, _replace_occurrence
+from Low_Confidence_Subagent import LowConfidenceSubagent, _apply_replacements, _plan_replacements
+from Main_Agent import record_warning_suffix
 from Record_Subagent import RecordSubagent
 
 CONFIG = {"api_url": "http://fake.invalid/v1", "api_key": "k", "model_name": "m", "max_tokens": 1000, "temperature": 0.0}
@@ -83,15 +84,36 @@ def test_a_real_pass_is_still_a_pass():
     assert result["incomplete"] is False and result["scan_errors"] == 0 and result["total_rounds"] == 2
 
 
+def plan(note, *items):
+    phrases = [dict(item) for item in items]
+    statuses, claims = _plan_replacements(note, phrases)
+    return [statuses[id(p)] for p in phrases], _apply_replacements(note, claims)
+
+
 def test_the_occurrence_names_which_place_of_a_repeated_phrase_is_doubtful():
     text = "否認胸痛。否認胸痛[問診紀錄_患者R1]。否認胸痛"
-    marked, status = _replace_occurrence(text, "否認胸痛", "**否認胸痛（x）**", 3)
-    assert status == "replaced" and marked.endswith("。**否認胸痛（x）**") and marked.count("**") == 2
-    assert _replace_occurrence(text, "否認胸痛", "**X**", 4) == (text, "not_found")
+    statuses, marked = plan(text, {"original_phrase": "否認胸痛", "reason": "x", "occurrence": 3})
+    assert statuses == ["replaced"] and marked.endswith("。**否認胸痛（x）**") and marked.count("**") == 2
+    assert plan(text, {"original_phrase": "否認胸痛", "reason": "x", "occurrence": 4}) == (["not_found"], text)
     already = "**否認胸痛（x）**。否認胸痛"
-    assert _replace_occurrence(already, "否認胸痛", "**Y**", 1)[1] == "already_tagged"      # a place in bold counts, and is not marked twice
-    assert _replace_occurrence(already, "否認胸痛", "**Y**", 2)[1] == "replaced"
-    assert _replace_occurrence("無異常[2026-01-02-胸部X光]", "異常[2026-01-02", "**Z**", 1)[1] == "citation_tag"
+    assert plan(already, {"original_phrase": "否認胸痛", "reason": "y", "occurrence": 1})[0] == ["already_tagged"]    # a place in bold counts
+    assert plan(already, {"original_phrase": "否認胸痛", "reason": "y", "occurrence": 2})[0] == ["replaced"]
+    assert plan("無異常[2026-01-02-胸部X光]", {"original_phrase": "異常[2026-01-02", "reason": "z"})[0] == ["citation_tag"]
+
+
+def test_several_phrases_of_one_round_are_all_placed_on_the_note_the_model_saw():
+    # the reason of the first phrase contains the second phrase's words: with one-by-one editing the count of the second would shift
+    note = "胸痛三天。胸痛加重。"
+    statuses, marked = plan(note,
+                            {"original_phrase": "胸痛", "reason": "胸痛的來源不明", "occurrence": 1},
+                            {"original_phrase": "胸痛", "reason": "只有家屬轉述", "occurrence": 2})
+    assert statuses == ["replaced", "replaced"]
+    assert marked == "**胸痛（胸痛的來源不明）**三天。**胸痛（只有家屬轉述）**加重。"
+    # without occurrence, two entries for the same words take two different places; a repeated request for one place is not marked twice
+    statuses, marked = plan(note, {"original_phrase": "胸痛", "reason": "a"}, {"original_phrase": "胸痛", "reason": "b"})
+    assert statuses == ["replaced", "replaced"] and marked.count("**") == 4 and "（a）" in marked and "（b）" in marked
+    statuses, marked = plan(note, {"original_phrase": "胸痛", "reason": "a", "occurrence": 1}, {"original_phrase": "胸痛", "reason": "dup", "occurrence": 1})
+    assert statuses == ["replaced", "already_tagged"] and "dup" not in marked
 
 
 def test_the_scan_marks_the_second_place_when_the_model_says_occurrence_2_and_ignores_a_bad_value():
@@ -168,3 +190,71 @@ def test_the_reviewer_sees_what_this_update_changed_and_the_writer_supplies_the_
                                             "operations": [{"op": "replace", "line": 1, "content": "血壓 120/80[人類醫師_T1]"}]}))
     writer.execute(note_content="血壓：", at_content="", target_field="note", guidelines="g")
     assert seen["previous_content"] == "血壓：" and seen["content"] == "血壓 120/80[人類醫師_T1]"
+
+
+@pytest.mark.parametrize("reply", [
+    "{}",
+    '{"intercept": "detected", "low_confidence_phrases": [{}]}',
+    '{"intercept": "detected", "low_confidence_phrases": [{"original_phrase": "", "reason": "x"}, "text"]}',
+    '{"intercept": "pass"}',
+    '{"low_confidence_phrases": []}',
+    '{"intercept": "maybe", "low_confidence_phrases": []}',
+    '{"intercept": "pass", "low_confidence_phrases": "none"}',
+    '[1, 2, 3]',
+])
+def test_a_reply_with_the_wrong_structure_is_a_failed_scan_not_a_pass(reply):
+    agent = lc()
+    agent.client = fake_client(reply)
+    result = agent.execute(note_content=NOTE)
+    assert result["incomplete"] is True and result["scan_errors"] == 2 and result["total_annotated"] == 0
+
+
+def test_a_well_formed_reply_is_accepted_even_when_it_contradicts_itself():
+    agent = lc(strength=1, rounds=2)
+    agent.client = fake_client(json.dumps({"intercept": "detected", "low_confidence_phrases": []}))      # detected, nothing named: a pass
+    result = agent.execute(note_content=NOTE)
+    assert result["incomplete"] is False and result["scan_errors"] == 0
+    agent = lc(strength=1, rounds=1)
+    both = {"intercept": "pass", "low_confidence_phrases": [{"original_phrase": "否認胸痛", "reason": "r"}, {"bad": 1}]}
+    agent.client = fake_client(json.dumps(both))                                                          # a valid phrase among invalid ones is kept
+    assert agent.execute(note_content=NOTE)["total_annotated"] == 1
+
+
+def test_the_scan_prompt_carries_the_scope_of_this_turns_update_only_when_there_is_one():
+    agent = lc(strength=1, rounds=1)
+    agent.client = fake_client(json.dumps({"intercept": "pass", "low_confidence_phrases": []}))
+    agent.execute(note_content=NOTE, update_guidelines="局部更新：只更新血壓，其餘內容不動")
+    user = agent.client.calls[-1]["messages"][1]["content"]
+    assert "## 【本輪病歷更新的登載方針】" in user and "局部更新：只更新血壓，其餘內容不動" in user
+    agent.execute(note_content=NOTE)
+    assert "本輪病歷更新的登載方針" not in agent.client.calls[-1]["messages"][1]["content"]
+
+
+def refusing_writer(reviewer):
+    writer = RecordSubagent(CONFIG, {**CONFIG, "detection_strength": 1, "max_review_rounds": 1})
+    writer.hallucination_reviewer = reviewer
+    reply = {"thinking": "t", "target_field": "note", "notes_for_main": "患者說對青黴素過敏，這次局部更新沒寫入",
+             "operations": [{"op": "replace", "line": 1, "content": "血壓 120/80[人類醫師_T1]"}]}
+    writer.client = fake_client(json.dumps(reply, ensure_ascii=False))
+    return writer
+
+
+def test_the_writers_warning_survives_a_refused_update_and_an_update_without_a_reviewer():
+    class Refuser:
+        def review(self, **kwargs):
+            return {"agree": "no", "comment": "不通過", "thinking": ""}
+
+    refused = refusing_writer(Refuser()).execute(note_content="血壓：", at_content="", target_field="note", guidelines="g")
+    assert refused["success"] is False and refused["notes_for_main"] == "患者說對青黴素過敏，這次局部更新沒寫入"
+    unreviewed = refusing_writer(None)
+    unreviewed.hallucination_reviewer = None
+    done = unreviewed.execute(note_content="血壓：", at_content="", target_field="note", guidelines="g")
+    assert done["success"] is True and done["notes_for_main"] == "患者說對青黴素過敏，這次局部更新沒寫入"
+
+
+def test_the_main_agent_puts_the_warning_in_the_step_result_whether_or_not_the_record_was_written():
+    sub = {"notes_for_main": "患者說對青黴素過敏"}
+    assert record_warning_suffix(sub, written=True) == "；病歷登載助理提醒：患者說對青黴素過敏"
+    refused = record_warning_suffix(sub, written=False)
+    assert "病歷雖未寫入，仍須轉告醫師" in refused and "患者說對青黴素過敏" in refused
+    assert record_warning_suffix({"notes_for_main": " "}, written=True) == "" and record_warning_suffix({}, written=False) == ""

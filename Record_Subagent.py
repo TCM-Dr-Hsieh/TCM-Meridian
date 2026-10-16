@@ -216,7 +216,15 @@ class RecordSubagent:
             self.detection_strength = 2
             self.max_review_rounds = 5
 
-    def execute(
+    def execute(self, *args, **kwargs) -> dict[str, Any]:
+        """Run one update (see `_execute_impl`). `notes_for_main` -- the writer's warning about safety information it did not write in a
+        partial update -- is on every result: a refused or failed update does not make a found allergy unimportant."""
+        self._notes_for_main = ""
+        result = self._execute_impl(*args, **kwargs)
+        result["notes_for_main"] = self._notes_for_main
+        return result
+
+    def _execute_impl(
         self,
         note_content: str,
         at_content: str,
@@ -462,6 +470,7 @@ class RecordSubagent:
         thinking = parsed.get("thinking", "")
         # 給主治醫師的提醒（選填）：登載助理在局部更新時看到的、依規定不自行寫入的安全相關資訊
         notes_for_main = str(parsed.get("notes_for_main") or "").strip()
+        self._notes_for_main = notes_for_main
 
         _log(f"[Record Subagent] ══ 解析結果 ══")
         _log(f"[Record Subagent] thinking: {thinking}")
@@ -756,6 +765,7 @@ class RecordSubagent:
                         rewrite_note = str(rewrite_parsed.get("notes_for_main") or "").strip()
                         if rewrite_note:
                             notes_for_main = rewrite_note
+                            self._notes_for_main = rewrite_note
                         rewrite_ops = rewrite_parsed.get("operations", [])
                         if rewrite_ops:
                             rw_ok, rw_content, rewrite_logs, rw_failures = apply_operations(

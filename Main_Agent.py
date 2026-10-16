@@ -39,6 +39,15 @@ def _load_prompt(filename: str) -> str:
 # Main Agent 類別
 # ════════════════════════════════════════════════════════════════
 
+def record_warning_suffix(sub_result: dict, written: bool) -> str:
+    """The text that carries the record writer's `notes_for_main` into the step result. A refused update gets it too: the record was not
+    written, but a safety finding (an allergy, a red flag) the writer saw is still to be told to the physician."""
+    notes = (sub_result.get("notes_for_main") or "").strip()
+    if not notes:
+        return ""
+    return f"；病歷登載助理提醒：{notes}" if written else f"；病歷登載助理提醒（病歷雖未寫入，仍須轉告醫師）：{notes}"
+
+
 class MainAgent:
     """
     AI 主治醫師 Agent。
@@ -149,6 +158,8 @@ class MainAgent:
 
         # 暫停狀態（IC Subagent 暫停/恢復用）
         self._suspended: dict | None = None
+        # 本主輪 NOTE 最近一次的登載方針（低信心標註依它判斷遺漏的範圍；每個主輪開始時清空）
+        self._last_note_update_guidelines: str = ""
 
         # 患者檔案查詢狀態
         self._file_list_cache: str | None = None       # list_patient_files 的結果文字
@@ -771,6 +782,7 @@ class MainAgent:
         _log(f"{'='*60}\n")
 
         # 每個主輪開始時：清空當輪暫存檔案
+        self._last_note_update_guidelines = ""
         self._loaded_files.clear()
         self._file_list_cache = None
         self._patient_folder = patient_folder or self._patient_folder
@@ -1212,6 +1224,8 @@ class MainAgent:
 
                 target_field = action_input.get("target_field", "note")
                 guidelines = action_input.get("guidelines", "")
+                if target_field == "note":
+                    self._last_note_update_guidelines = guidelines      # 本輪 NOTE 最近一次的登載方針：低信心標註依它判斷遺漏的範圍
 
                 _log(f"[Main Agent] 呼叫 Record Subagent: field={target_field}")
 
@@ -1244,8 +1258,7 @@ class MainAgent:
                     ops_summary = f"成功執行 {len(sub_result['operations'])} 個操作"
                     review_info = f"(審查: {sub_result.get('review_result', '?')}, {sub_result.get('review_rounds', 0)}輪)"
                     step_record["result"] = f"{ops_summary} {review_info}"
-                    if sub_result.get("notes_for_main"):
-                        step_record["result"] += f"；病歷登載助理提醒：{sub_result['notes_for_main']}"
+                    step_record["result"] += record_warning_suffix(sub_result, written=True)
                     if current_note != before_note or current_at != before_at:
                         record_snapshots.append({
                             "note": current_note,
@@ -1268,6 +1281,7 @@ class MainAgent:
                     )
                 else:
                     step_record["result"] = f"失敗: {sub_result.get('error', '未知錯誤')}"
+                    step_record["result"] += record_warning_suffix(sub_result, written=False)     # 病歷沒寫入，安全資訊仍要提醒
                     _log(f"[Main Agent] Record Subagent 失敗: {sub_result.get('error')}")
 
                 steps.append(step_record)
@@ -1372,6 +1386,7 @@ class MainAgent:
                         history_summary=history_summary,
                         record_diff_context=_current_record_diff_context(),
                         loaded_files_block=self._format_loaded_files_block(),
+                        update_guidelines=self._last_note_update_guidelines,
                         image_files=self._loaded_files,
                         log_callback=log_callback,
                         behavior_context={"folder_path": self._patient_folder, "date_str": session_date},

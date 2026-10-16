@@ -71,8 +71,14 @@ def _unified_diff(old_text: str, new_text: str, old_label: str, new_label: str) 
 def build_record_diff_context(
     snapshots: list[dict[str, Any]] | None,
     current_index: int | None = None,
+    *,
+    has_recording: bool = False,
 ) -> str:
-    """Format snapshot history up to current_index as plain-text diffs for LLM prompts."""
+    """Format snapshot history up to current_index as plain-text diffs for LLM prompts.
+
+    The recording clock is shown on the versions when this session has a recording: some version carries `rec_t`, or the caller says
+    (`has_recording`) that a voice transcript exists. The second case matters when the recording began after the last version was
+    made: no version has `rec_t` yet, but every one of them says 尚未錄音, which tells the reviewer that the whole transcript came after."""
     valid_snapshots = [snap for snap in (snapshots or []) if isinstance(snap, dict)]
     if current_index is None:
         current_index = len(valid_snapshots) - 1
@@ -84,7 +90,7 @@ def build_record_diff_context(
         active_snapshots = valid_snapshots[: current_index + 1]
         # The recording clock is shown only for a session that has a recording (some version carries it): a session without
         # one reads exactly as before. A version made before the recording began then says so.
-        with_recording = any(snap.get("rec_t") is not None for snap in active_snapshots)
+        with_recording = has_recording or any(snap.get("rec_t") is not None for snap in active_snapshots)
         if len(active_snapshots) < 2:
             body = "（目前只有一個版本，尚無版本間 diff）"
         else:

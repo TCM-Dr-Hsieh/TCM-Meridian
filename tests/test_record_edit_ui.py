@@ -258,3 +258,13 @@ def test_a_running_voice_recording_blocks_leaving_the_session_but_nothing_else()
     assert guard.reason(include_voice=True) is None
     guard.ui_state["view_mode"] = "edit"
     assert guard.reason() == "edit_mode" and "放棄修改" in guard.message("edit_mode")
+
+
+def test_a_recording_that_began_after_the_last_version_still_marks_every_version_as_before_it():
+    history = SnapshotHistory()
+    history.push("a", "", source="AI")
+    history.push("b", "", source="人類修改")                  # both made before the recording; nothing carries rec_t yet
+    plain = build_record_diff_context(history.snapshots, history.current_index)
+    assert "尚未錄音" not in plain and "@錄音" not in plain      # no transcript, no recording: no clock
+    with_transcript = build_record_diff_context(history.snapshots, history.current_index, has_recording=True)
+    assert with_transcript.count("尚未錄音") >= 2 and "@錄音" not in with_transcript

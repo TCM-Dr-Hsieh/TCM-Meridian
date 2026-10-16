@@ -977,7 +977,7 @@ class MainAgent:
                         "at": current_at,
                         "source": "目前工作版本",
                     })
-            return build_record_diff_context(prompt_snapshots)
+            return build_record_diff_context(prompt_snapshots, has_recording=bool((voice_transcript or "").strip()))
 
         # 暴露 steps 引用供 UI polling
         self._live_steps = steps

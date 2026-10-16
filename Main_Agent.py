@@ -48,6 +48,22 @@ def record_warning_suffix(sub_result: dict, written: bool) -> str:
     return f"；病歷登載助理提醒：{notes}" if written else f"；病歷登載助理提醒（病歷雖未寫入，仍須轉告醫師）：{notes}"
 
 
+def lc_incomplete_text(lc_result: dict) -> str:
+    """The step result of a low-confidence scan that did not finish cleanly: what went wrong, and that the physician must be told."""
+    causes = []
+    if lc_result.get("scan_errors"):
+        causes.append(f"掃描時模型呼叫或輸出解析失敗 {lc_result['scan_errors']} 次")
+    skipped = lc_result.get("skipped_items") or []
+    if skipped:
+        shown = "；".join(str(entry.get("item", "")) for entry in skipped[:3]) + ("…" if len(skipped) > 3 else "")
+        causes.append(f"有 {len(skipped)} 個發現因缺 original_phrase 或 reason 而沒有標註（{shown}）")
+    return (
+        f"低信心標註未完成：{'；'.join(causes) or '掃描沒有走完'}，"
+        f"已跑 {lc_result.get('total_rounds', 0)} 輪、標註 {lc_result.get('total_annotated', 0)} 個片段。"
+        "這不代表 NOTE 沒有低信心內容，請在回覆中明確告訴醫師低信心標註沒有完成"
+    )
+
+
 class MainAgent:
     """
     AI 主治醫師 Agent。
@@ -859,6 +875,7 @@ class MainAgent:
         self._suspended = None
         if rec_clock is not None:
             self.rec_clock = rec_clock
+        self._last_note_update_guidelines = s.get("update_guidelines", "")        # 本主輪登載方針的範圍，隨暫停狀態存檔／還原
 
         def _log(msg: str):
             if log_callback:
@@ -1342,6 +1359,7 @@ class MainAgent:
                     "record_history_current_index": record_history_current_index,
                     "original_note": original_note,
                     "original_at": original_at,
+                    "update_guidelines": self._last_note_update_guidelines,
                 }
                 if self._active_turn:
                     self._active_turn["status"] = "waiting_for_interview"
@@ -1404,11 +1422,7 @@ class MainAgent:
                                 f"標註 {lc_result['total_annotated']} 個片段"
                             )
                             if lc_result.get("incomplete"):
-                                step_record["result"] = (
-                                    f"低信心標註未完成：掃描時模型呼叫或輸出解析失敗 {lc_result.get('scan_errors', 0)} 次，"
-                                    f"已跑 {lc_result['total_rounds']} 輪、標註 {lc_result['total_annotated']} 個片段。"
-                                    "這不代表 NOTE 沒有低信心內容，請在回覆中明確告訴醫師低信心標註沒有完成"
-                                )
+                                step_record["result"] = lc_incomplete_text(lc_result)
                             if current_note != before_note:
                                 record_snapshots.append({
                                     "note": current_note,
@@ -1522,6 +1536,7 @@ class MainAgent:
                         "record_history_current_index": record_history_current_index,
                         "original_note": original_note,
                         "original_at": original_at,
+                        "update_guidelines": self._last_note_update_guidelines,
                     }
                     if self._active_turn:
                         self._active_turn["status"] = "waiting_for_interview"

@@ -7,7 +7,7 @@ import pytest
 
 from Hallucination_Subagent import HallucinationSubagent
 from Low_Confidence_Subagent import LowConfidenceSubagent, _apply_replacements, _plan_replacements
-from Main_Agent import record_warning_suffix
+from Main_Agent import lc_incomplete_text, record_warning_suffix
 from Record_Subagent import RecordSubagent
 
 CONFIG = {"api_url": "http://fake.invalid/v1", "api_key": "k", "model_name": "m", "max_tokens": 1000, "temperature": 0.0}
@@ -258,3 +258,103 @@ def test_the_main_agent_puts_the_warning_in_the_step_result_whether_or_not_the_r
     refused = record_warning_suffix(sub, written=False)
     assert "病歷雖未寫入，仍須轉告醫師" in refused and "患者說對青黴素過敏" in refused
     assert record_warning_suffix({"notes_for_main": " "}, written=True) == "" and record_warning_suffix({}, written=False) == ""
+
+
+def test_phrases_that_overlap_in_one_round_become_one_mark_with_both_reasons():
+    note = "否認胸痛且無呼吸困難，持續三天"
+    statuses, marked = plan(note, {"original_phrase": "胸痛", "reason": "a"}, {"original_phrase": "胸痛且無呼吸困難", "reason": "b"})
+    assert statuses == ["replaced", "replaced"] and marked == "否認**胸痛且無呼吸困難（a；b）**，持續三天"    # 無呼吸困難 is not left bare
+    # the longer one first: the shorter lies wholly inside it, nothing is lost by not marking it again
+    statuses, marked = plan(note, {"original_phrase": "胸痛且無呼吸困難", "reason": "b"}, {"original_phrase": "胸痛", "reason": "a"})
+    assert statuses == ["replaced", "already_tagged"] and marked == "否認**胸痛且無呼吸困難（b）**，持續三天"
+    # a partial overlap from either side joins the two spans
+    statuses, marked = plan("無胸痛且無呼吸困難", {"original_phrase": "無胸痛", "reason": "a"}, {"original_phrase": "痛且無呼吸困難", "reason": "b"})
+    assert statuses == ["replaced", "replaced"] and marked == "**無胸痛且無呼吸困難（a；b）**"
+    # the same reason twice is said once; phrases that do not touch stay two marks
+    assert plan(note, {"original_phrase": "胸痛", "reason": "a"}, {"original_phrase": "胸痛且無呼吸困難", "reason": "a"})[1] == "否認**胸痛且無呼吸困難（a）**，持續三天"
+    assert plan(note, {"original_phrase": "否認", "reason": "a"}, {"original_phrase": "持續三天", "reason": "b"})[1].count("**") == 4
+
+
+def test_the_scan_counts_a_merged_mark_once():
+    answers = iter([
+        {"intercept": "detected", "low_confidence_phrases": [{"original_phrase": "胸痛", "reason": "a"}, {"original_phrase": "胸痛且無呼吸困難", "reason": "b"}]},
+        {"intercept": "pass", "low_confidence_phrases": []},
+    ])
+    agent = lc(strength=1, rounds=3)
+    agent.client = fake_client(lambda kwargs: json.dumps(next(answers), ensure_ascii=False))
+    result = agent.execute(note_content="否認胸痛且無呼吸困難")
+    assert result["annotated_note"] == "否認**胸痛且無呼吸困難（a；b）**" and result["total_annotated"] == 1 and result["incomplete"] is False
+
+
+MIXED = {"intercept": "detected", "low_confidence_phrases": [
+    {"original_phrase": "否認胸痛", "reason": "只有家屬轉述"},
+    {"reason": "過敏資訊遺漏"},
+]}
+
+
+def test_an_item_without_a_phrase_is_asked_for_again_and_the_repaired_answer_is_used():
+    repaired = {"intercept": "detected", "low_confidence_phrases": [
+        {"original_phrase": "否認胸痛", "reason": "只有家屬轉述"},
+        {"original_phrase": "乙- 其他", "reason": "過敏資訊遺漏，沒有來源"},
+    ]}
+    answers = iter([MIXED, repaired, {"intercept": "pass", "low_confidence_phrases": []}])
+    agent = lc(strength=1, rounds=3)
+    agent.client = fake_client(lambda kwargs: json.dumps(next(answers), ensure_ascii=False))
+    result = agent.execute(note_content=NOTE)
+    assert result["skipped_items"] == [] and result["incomplete"] is False and result["total_annotated"] == 2
+    asked = agent.client.calls[1]["messages"]
+    assert asked[-2]["role"] == "assistant" and "過敏資訊遺漏" in asked[-1]["content"] and "original_phrase" in asked[-1]["content"]
+
+
+def test_an_item_that_stays_unusable_is_reported_not_dropped_and_the_valid_marks_stay():
+    agent = lc(strength=1, rounds=1)
+    agent.client = fake_client(json.dumps(MIXED, ensure_ascii=False))
+    result = agent.execute(note_content=NOTE)
+    assert len(agent.client.calls) == 3                                            # asked twice more, then gave up on the item
+    assert result["total_annotated"] == 1 and "**否認胸痛（只有家屬轉述）**" in result["annotated_note"]
+    assert result["incomplete"] is True and result["scan_errors"] == 0
+    assert [entry["round"] for entry in result["skipped_items"]] == [1] and "過敏資訊遺漏" in result["skipped_items"][0]["item"]
+
+
+def test_the_step_result_says_what_the_unfinished_scan_lacked():
+    both = {"scan_errors": 1, "total_rounds": 3, "total_annotated": 2, "skipped_items": [{"round": 2, "item": '{"reason": "過敏資訊遺漏"}'}]}
+    text = lc_incomplete_text(both)
+    assert text.startswith("低信心標註未完成：") and "輸出解析失敗 1 次" in text and "過敏資訊遺漏" in text and "已跑 3 輪、標註 2 個片段" in text
+    assert "請在回覆中明確告訴醫師低信心標註沒有完成" in text
+    assert "輸出解析失敗" not in lc_incomplete_text({"scan_errors": 0, "total_rounds": 1, "total_annotated": 1, "skipped_items": [{"item": "x"}]})
+
+
+def test_the_scope_of_the_update_survives_a_save_and_restore_during_the_interview():
+    from Main_Agent import MainAgent
+
+    def build():
+        return MainAgent(CONFIG, CONFIG, None, CONFIG, CONFIG)
+
+    first = build()
+    script = iter([
+        {"thinking": "t", "action": "update_record", "action_input": {"target_field": "note", "guidelines": "局部更新：只更新血壓"}, "next_step": ""},
+        {"thinking": "t", "action": "information_collection_subagent", "action_input": "問頭痛", "next_step": ""},
+    ])
+    first._call_llm = lambda *args, **kwargs: next(script)
+    first.record_subagent.execute = lambda **kwargs: {"success": True, "note": "血壓 128/82[人類醫師_T1]", "at": "", "operations": [],
+                                                      "review_result": "agree", "review_rounds": 1}
+    started = first.process_message("更新血壓", "", "", session_date="2026-10-17")
+    assert started["waiting_for_interview"] is True
+
+    second = build()                                                   # a new assistant, as after a restart
+    second.restore_state(json.loads(json.dumps(first.export_state())))
+    seen = {}
+
+    def spy(**kwargs):
+        seen.update(kwargs)
+        return {"success": True, "annotated_note": kwargs["note_content"], "total_rounds": 1, "total_annotated": 0, "all_phrases": [],
+                "scan_errors": 0, "skipped_items": [], "incomplete": False, "error": None}
+
+    second.lc_subagent.execute = spy
+    after = iter([
+        {"thinking": "t", "action": "low_confidence_check", "action_input": "", "next_step": ""},
+        {"thinking": "t", "action": "reply", "action_input": "好", "next_step": ""},
+    ])
+    second._call_llm = lambda *args, **kwargs: next(after)
+    done = second.continue_after_interview("", "問診完成", "血壓 128/82[人類醫師_T1]", "")
+    assert done["reply"] == "好" and seen["update_guidelines"] == "局部更新：只更新血壓"

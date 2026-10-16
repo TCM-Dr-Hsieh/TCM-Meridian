@@ -45,27 +45,29 @@ def _plan_replacements(note: str, phrases: list[dict]) -> tuple[dict[int, str], 
     """Where each phrase of ONE scan round goes, resolved on the note exactly as the model saw it (not after the earlier phrases of the
     round have been applied: their added reasons would shift the count of a later `occurrence`).
 
-    A phrase without `occurrence` takes the first place that is not in bold, not across a source tag and not already taken by another
-    phrase of this round; with `occurrence` it takes that place (1-based, top to bottom, places in bold counted). Returns
-    ({id(phrase): status}, [(start, end, replacement)]) with status replaced | already_tagged | citation_tag | not_found."""
+    A phrase without `occurrence` takes the first place that is not in bold, not across a source tag and not already covered by a mark
+    of this round; with `occurrence` it takes that place (1-based, top to bottom, places in bold counted). A place that only partly
+    overlaps a mark of this round (or holds one) is not "already marked": the two are merged into one mark over both spans with both
+    reasons, so the part the earlier mark did not cover is not left without a warning. Returns
+    ({id(phrase): status}, [(start, end, reasons)]) with status replaced | already_tagged | citation_tag | not_found."""
     statuses: dict[int, str] = {}
-    claims: list[tuple[int, int, str]] = []
+    claims: list[list] = []         # [start, end, [reasons]]
 
-    def taken(start: int, end: int) -> bool:
-        return any(start < claimed_end and end > claimed_start for claimed_start, claimed_end, _ in claims)
+    def overlapping(start: int, end: int) -> list[list]:
+        return [claim for claim in claims if start < claim[1] and end > claim[0]]
 
     for info in phrases:
         original = info.get("original_phrase", "")
         if not original:
             statuses[id(info)] = "not_found"
             continue
-        replacement = f"**{original}（{info.get('reason', '')}）**"
+        reason = info.get("reason", "")
         occurrence = info.get("occurrence")
         wanted = occurrence if isinstance(occurrence, int) and not isinstance(occurrence, bool) and occurrence >= 1 else None
         start = 0
         seen = 0
         found_bold = found_tag = False
-        chosen: tuple[int, int] | None = None
+        chosen: tuple[int, int, list[list]] | None = None
         while True:
             index = note.find(original, start)
             if index < 0:
@@ -75,27 +77,36 @@ def _plan_replacements(note: str, phrases: list[dict]) -> tuple[dict[int, str], 
             seen += 1
             if wanted is not None and seen != wanted:
                 continue
-            if _inside_bold_span(note, index) or taken(index, end):
-                found_bold = True
+            hits = overlapping(index, end)
+            if _inside_bold_span(note, index) or any(claim[0] <= index and end <= claim[1] for claim in hits):
+                found_bold = True               # in bold already, or wholly inside a mark of this round
             elif _overlaps_citation_tag(note, index, end):
                 found_tag = True
             else:
-                chosen = (index, end)
+                chosen = (index, end, hits)
                 break
             if wanted is not None:
                 break
         if chosen is not None:
-            claims.append((chosen[0], chosen[1], replacement))
+            first, last, hits = chosen
+            reasons: list[str] = []
+            for claim in hits:
+                first, last = min(first, claim[0]), max(last, claim[1])
+                reasons += [text for text in claim[2] if text not in reasons]
+                claims.remove(claim)
+            if reason not in reasons:
+                reasons.append(reason)
+            claims.append([first, last, reasons])
             statuses[id(info)] = "replaced"
         else:
             statuses[id(info)] = "citation_tag" if found_tag else ("already_tagged" if found_bold else "not_found")
-    return statuses, claims
+    return statuses, [(start, end, tuple(reasons)) for start, end, reasons in claims]
 
 
-def _apply_replacements(note: str, claims: list[tuple[int, int, str]]) -> str:
-    """Apply the planned replacements from the end of the note backwards, so no position moves before it is used."""
-    for start, end, replacement in sorted(claims, key=lambda claim: claim[0], reverse=True):
-        note = note[:start] + replacement + note[end:]
+def _apply_replacements(note: str, claims: list[tuple[int, int, tuple[str, ...]]]) -> str:
+    """Apply the planned marks from the end of the note backwards, so no position moves before it is used."""
+    for start, end, reasons in sorted(claims, key=lambda claim: claim[0], reverse=True):
+        note = note[:start] + f"**{note[start:end]}（{'；'.join(reasons)}）**" + note[end:]
     return note
 
 
@@ -275,6 +286,7 @@ class LowConfidenceSubagent:
         lc_round = 0
         scan_errors = 0                  # rounds in which the model call or its output failed: not a "pass", the check did not happen
         consecutive_errors = 0
+        skipped_items: list[dict] = []   # findings the model gave without a usable phrase/reason, and did not repair when asked
 
         _log(f"\n{'='*60}")
         _log(f"[LC Subagent] 開始迭代掃描（至多 {self.max_scan_rounds} 輪，檢測強度 {self.detection_strength}）")
@@ -312,6 +324,9 @@ class LowConfidenceSubagent:
                     break
                 continue
             consecutive_errors = 0
+            for item in check_result.get("invalid_items", []):
+                skipped_items.append({"round": lc_round, "item": item})
+                _log(f"[LC 第 {lc_round} 輪] 有一個發現格式不合、無法標註：{item}")
 
             # 標註替換：這一輪的所有位置先依「送給模型看的那份 NOTE」一次算好，再整批套用
             replacement_results, claims = _plan_replacements(current_note, round_phrases)
@@ -413,7 +428,8 @@ class LowConfidenceSubagent:
 
         # A round that failed is not a round that found nothing: if the scan never reached the passes it needs and some round failed, the
         # check is incomplete (what was marked before the failure is kept) and the caller must say so, not report "done".
-        incomplete = scan_errors > 0 and lc_pass_count < self.detection_strength
+        # An item that could not be placed is a finding that is not on the note: the scan is incomplete as well.
+        incomplete = (scan_errors > 0 and lc_pass_count < self.detection_strength) or bool(skipped_items)
         return {
             "success": True,
             "annotated_note": current_note,
@@ -421,6 +437,7 @@ class LowConfidenceSubagent:
             "total_annotated": total_annotated,
             "all_phrases": all_phrases,
             "scan_errors": scan_errors,
+            "skipped_items": skipped_items,
             "incomplete": incomplete,
             "error": None,
         }
@@ -428,6 +445,20 @@ class LowConfidenceSubagent:
     # ════════════════════════════════════════════════════════════
     # 內部方法
     # ════════════════════════════════════════════════════════════
+
+    @staticmethod
+    def _usable_phrase(item) -> bool:
+        return (isinstance(item, dict)
+                and isinstance(item.get("original_phrase"), str) and bool(item["original_phrase"].strip())
+                and isinstance(item.get("reason"), str))
+
+    @staticmethod
+    def _describe_item(item) -> str:
+        try:
+            text = json.dumps(item, ensure_ascii=False)
+        except (TypeError, ValueError):
+            text = repr(item)
+        return text if len(text) <= 160 else text[:160] + "…"
 
     @staticmethod
     def _structure_problem(result) -> str:
@@ -537,7 +568,9 @@ class LowConfidenceSubagent:
             {"role": "user", "content": user_prompt},
         ]
 
+        best: dict | None = None        # the latest answer with the right structure that still holds items nobody can place
         for attempt in range(self.MAX_JSON_RETRIES + 1):
+            repair = ""
             try:
                 resp = self.client.chat.completions.create(
                     model=self.model,
@@ -577,12 +610,8 @@ class LowConfidenceSubagent:
                     if not problem:
                         phrases = result["low_confidence_phrases"]
                         intercept = str(result["intercept"]).strip().lower()
-                        valid_phrases = [
-                            p for p in phrases
-                            if isinstance(p, dict)
-                            and isinstance(p.get("original_phrase"), str) and p["original_phrase"].strip()
-                            and isinstance(p.get("reason"), str)
-                        ]
+                        valid_phrases = [p for p in phrases if self._usable_phrase(p)]
+                        invalid_items = [self._describe_item(p) for p in phrases if not self._usable_phrase(p)]
                         if phrases and not valid_phrases:
                             problem = "low_confidence_phrases 裡沒有任何合格的片段（需要 original_phrase 與 reason）"
                         else:
@@ -591,18 +620,34 @@ class LowConfidenceSubagent:
                                 intercept = "detected"
                             if not valid_phrases and intercept == "detected":
                                 intercept = "pass"
-                            return {
-                                "intercept": intercept,
-                                "phrases": valid_phrases,
-                            }
+                            answer = {"intercept": intercept, "phrases": valid_phrases, "invalid_items": invalid_items}
+                            if not invalid_items:
+                                return answer
+                            # 合格的片段保留；不合格的是「發現了、卻沒有地方可標」，不能當作沒有：先請模型補齊重新輸出，
+                            # 補不齊就連同不合格項一起回報（掃描結果標為未完成），不靜默丟棄
+                            if best is None or len(invalid_items) <= len(best["invalid_items"]):
+                                best = answer
+                            problem = f"有 {len(invalid_items)} 個片段缺 original_phrase 或 reason"
+                            repair = (
+                                f"你上一個輸出有 {len(invalid_items)} 個片段不合格，系統無法標註：\n" + "\n".join(invalid_items)
+                                + "\n請完整重新輸出整份 JSON：每個片段都要有 original_phrase（病歷原文的精確片段）與 reason；"
+                                "已合格的片段請原樣保留；若確認某項其實不需要標註，直接不要列出。"
+                            )
 
-            # 輸出不合規格：重試，最後視為掃描失敗
+            # 輸出不合規格：重試，最後視為掃描失敗（有合格片段的答案則保留，並回報不合格項）
             if attempt < self.MAX_JSON_RETRIES:
                 _log(
                     f"[LC] {problem}，"
                     f"第 {attempt + 1} 次重試..."
                 )
+                if repair:
+                    _lc_messages = _lc_messages + [
+                        {"role": "assistant", "content": raw_output},
+                        {"role": "user", "content": repair},
+                    ]
             else:
-                _log(f"[LC] {problem}，已達重試上限，本輪視為掃描失敗")
+                _log(f"[LC] {problem}，已達重試上限，{'保留合格片段、回報不合格項' if best else '本輪視為掃描失敗'}")
 
+        if best is not None:
+            return best
         return {"intercept": "error", "phrases": [], "error": problem}

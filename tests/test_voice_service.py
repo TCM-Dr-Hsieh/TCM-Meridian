@@ -541,3 +541,69 @@ async def test_a_session_gives_the_same_position_loaded_or_not_loaded(patient):
     assert restarted.recording_position(patient, DATE) == loaded == (4.0, True)
     restarted.attach(patient, DATE)                                       # now loaded from the same file
     assert restarted.recording_position(patient, DATE) == loaded
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# A segment of nothing but background voices is not in what the agents are given: the clock stops before it
+# ---------------------------------------------------------------------------------------------------------------------
+class OnlyBackground:
+    """A speaker service that filters the way the real one does: the listed segments hold nothing but background voices."""
+    failed = ''
+    marks_in_text = False
+    settings = SimpleNamespace(use_in_jobs=True)
+
+    def __init__(self, background):
+        self.background = set(background)
+
+    def body(self, segment, *, marks, keep_background=False):
+        return '' if segment.index in self.background and not keep_background else None
+
+
+async def test_the_clock_stops_before_a_segment_of_background_voices_and_moves_on_when_it_becomes_foreground(patient):
+    manager = make_manager()
+    manager.attach(patient, DATE)
+    await record(manager, 7)
+    pipeline = manager.session.pipeline
+    pipeline.segments[:] = [segment_of(1, 0.0, 4.0, '我頭痛三天'), segment_of(2, 4.0, 7.0, '隔壁房間的說話聲')]
+    pipeline.speaker = OnlyBackground({2})
+    assert '隔壁' not in pipeline.snapshot().text                          # the agents are not given it ...
+    assert pipeline.upto == 4.0 and manager.recording_position(patient, DATE) == (4.0, True)       # ... and the clock does not reach it
+    pipeline.speaker = OnlyBackground(set())                              # judged again: it was a foreground voice after all
+    assert '隔壁' in pipeline.snapshot().text and pipeline.upto == 7.0
+    assert manager.recording_position(patient, DATE) == (7.0, True)       # a version made now is after it; one made before it was not
+
+
+async def test_a_session_with_background_voices_gives_the_same_position_loaded_or_not_loaded(patient):
+    first = make_manager()
+    first.attach(patient, DATE)
+    await record(first, 7)
+    paths = voice_paths(patient, DATE)
+    saved = json.loads(paths.transcript_json.read_text(encoding='utf-8'))
+    saved['segments'] = [vars(segment_of(1, 0.0, 4.0, '我頭痛三天')) | {'kind': 'speech'},
+                         vars(segment_of(2, 4.0, 7.0, '隔壁房間的說話聲')) | {'kind': 'speech'}]
+    saved['speaker'] = {'status': '', 'roles_trusted': True, 'labels': {
+        '1': [[0, 5, 'doctor', '', 0]], '2': [[0, 8, 'background', '', -1]]}}      # what the speaker service saved
+    paths.transcript_json.write_text(json.dumps(saved), encoding='utf-8')
+    restarted = make_manager()
+    events_before = paths.events.read_text(encoding='utf-8')
+    assert restarted.session is None
+    offline = restarted.recording_position(patient, DATE)
+    assert offline == (4.0, True)                                          # the background sentence is not counted offline either
+    assert paths.events.read_text(encoding='utf-8') == events_before and restarted.session is None      # looking logs nothing, attaches nothing
+    restarted.attach(patient, DATE)
+    assert restarted.recording_position(patient, DATE) == offline
+    assert '隔壁' not in restarted.snapshot_text(patient, DATE)
+
+
+async def test_the_clock_of_an_agent_turn_reads_pauses_without_working_out_the_transcript(patient):
+    manager = make_manager()
+    manager.attach(patient, DATE)
+    await record(manager, 7)
+    clock = manager.frozen_clock(patient, DATE)
+    calls = []
+    original = manager.session.pipeline.__class__.upto.fget
+    manager.session.pipeline.__class__.upto = property(lambda self: calls.append(1) or original(self))
+    try:
+        assert clock() == (7.0, True) and calls == []                     # only the pause is read again, never the transcript
+    finally:
+        manager.session.pipeline.__class__.upto = property(original)

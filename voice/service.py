@@ -37,7 +37,7 @@ from .config import VoiceSettings, resolve_path
 from .corrector import TranscriptCorrector
 from .fileio import atomic_write_json, atomic_write_text
 from .llm import LLMCaller, LLMClient
-from .pipeline import TranscriptPipeline, load_segments, visible_end
+from .pipeline import TranscriptPipeline
 from .remote import RemoteAudioSource
 from .speaker.embedder import load_embedder
 from .speaker.service import SpeakerService
@@ -84,16 +84,6 @@ def voice_paths(folder: str | Path, date: str) -> VoicePaths:
 
 def _now() -> str:
     return datetime.now().isoformat(timespec='seconds')
-
-
-def _saved_transcript_end(path: Path) -> float:
-    """Where the transcript saved for a session ends (0.0 when there is none or the file is unreadable): the same rule as a loaded
-    transcript, so the answer does not change when the session is loaded."""
-    try:
-        data = json.loads(path.read_text(encoding='utf-8'))
-        return visible_end(load_segments(data.get('segments')))
-    except (OSError, ValueError, TypeError, KeyError, AttributeError):
-        return 0.0
 
 
 class VoiceSession:
@@ -544,30 +534,54 @@ class VoiceManager:
         who edits the record has read only what is. `None` seconds = this session has no recording; 0.0 = it has one but nothing is
         transcribed yet. The clock only grows, so it orders a manual edit against the transcript lines: every line that ends at or
         before it was visible to the physician, every later one was not."""
+        found = self._find_recording(folder, date)
+        if found is None:
+            return None, False
+        paused, end = found
+        return end(), paused
+
+    def recording_paused(self, folder: str | None = None, date: str | None = None) -> bool:
+        found = self._find_recording(folder, date)
+        return bool(found and found[0])
+
+    def _find_recording(self, folder: str | None, date: str | None) -> tuple[bool, Callable[[], float]] | None:
+        """None = the session has no recording; else (paused, a function that gives where the transcript on the screen ends)."""
         if folder is not None and not self.matches(folder, date):
             # Not the loaded session (after a restart, or a page reloaded before its voice window was opened): the recording of that
             # session is still its file. Without this a version made now would get "no recording yet", and a reviewer could take
             # the earlier transcript lines for evidence that appeared after the edit.
-            if not folder or not date:
-                return None, False
-            paths = voice_paths(folder, date)
-            return (_saved_transcript_end(paths.transcript_json), True) if sample_count(paths.audio) else (None, False)
+            if not folder or not date or not sample_count(voice_paths(folder, date).audio):
+                return None
+            return True, lambda: self._saved_transcript_end(folder, date)
         session = self.session
         if session is None:
-            return None, False
-        pipeline = session.pipeline
+            return None
+
+        def loaded_end() -> float:
+            return session.pipeline.upto if session.pipeline is not None else 0.0
+
         if session.state != 'idle' and session.source is not None:
-            return (pipeline.upto if pipeline is not None else 0.0), False
+            return False, loaded_end
         if not sample_count(session.paths.audio):
-            return None, False
-        return (pipeline.upto if pipeline is not None else 0.0), True
+            return None
+        return True, loaded_end
+
+    def _saved_transcript_end(self, folder: str, date: str) -> float:
+        """Where the transcript saved for a session that is not loaded ends: the session is read the way loading it would read it (the saved
+        speaker marks included, which decide what is a background voice), so the answer does not change once it is loaded. Nothing is
+        attached and nothing is logged."""
+        probe = VoiceSession(self, folder, date)
+        probe.emit = lambda *args, **kwargs: None
+        probe._changed = lambda *args, **kwargs: None
+        probe.load()
+        return probe.pipeline.upto if probe.pipeline is not None else 0.0
 
     def frozen_clock(self, folder: str | None, date: str | None) -> Callable[[], tuple[float | None, bool]]:
         """The clock for the versions an agent writes during one turn. Call it where `snapshot_text` is called: the position stays where
         that frozen transcript ends. Lines that arrive while the agent works were seen neither by the physician who asked nor by the
         agent, so they are not "before" what the agent writes. Whether the recording is paused is still read live."""
         seconds = self.recording_position(folder, date)[0]
-        return lambda: (seconds, self.recording_position(folder, date)[1])
+        return lambda: (seconds, self.recording_paused(folder, date))
 
     @property
     def remote_token(self) -> str:

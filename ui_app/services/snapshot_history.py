@@ -19,12 +19,14 @@ class SnapshotHistory:
         *,
         rec_t: float | None = None,
         rec_paused: bool = False,
+        rec_hidden: list[int] | None = None,
         meta: dict | None = None,
         after_turn: int | None = None,
     ) -> list[dict]:
         """Add a version. `rec_t` is the recording clock when the version was made: where the voice transcript that could be seen then ended
         (seconds of the recording), which orders the version against the transcript lines. 0 = a recording, but no transcript
-        yet; None = this session had no recording yet.
+        yet; None = this session had no recording yet. `rec_hidden`: the transcript segments that end before `rec_t` but were not on the screen
+        then (a background voice judged to be a foreground one later, a segment not filled yet): they came after the version.
         `after_turn`: how many Main Agent turns had been started when a physician edited by hand (0 = none yet): the edit lies after
         that turn and before the next one, which orders it against the interview rounds and the agents' own versions (`Turn X-Y`).
         `meta`: what a physician edit took away (`removed_tags`, `dropped_marks`), kept with the version for the audit and the diff."""
@@ -41,6 +43,8 @@ class SnapshotHistory:
             snapshot["rec_t"] = round(float(rec_t), 2)
             if rec_paused:
                 snapshot["rec_paused"] = True
+            if rec_hidden:
+                snapshot["rec_hidden"] = [int(index) for index in rec_hidden]
         if meta:
             snapshot["meta"] = meta
         if after_turn is not None:

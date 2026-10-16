@@ -1014,7 +1014,7 @@ class MainAgent:
                         "source": "目前工作版本",
                     })
             return build_record_diff_context(prompt_snapshots, has_recording=bool((voice_transcript or "").strip()),
-                                              interview_dialogue=interview_dialogue)
+                                              interview_dialogue=interview_dialogue, voice_transcript=voice_transcript or "")
 
         # 暴露 steps 引用供 UI polling
         self._live_steps = steps
@@ -2239,7 +2239,9 @@ class MainAgent:
         if self.rec_clock is None:
             return {}
         try:
-            seconds, paused = self.rec_clock()
+            position = self.rec_clock()
+            seconds, paused = position[0], position[1]
+            hidden = [int(index) for index in getattr(position, "hidden", ()) or ()]
         except Exception:
             return {}
         if seconds is None:
@@ -2247,6 +2249,8 @@ class MainAgent:
         fields: dict[str, Any] = {"rec_t": round(float(seconds), 2)}
         if paused:
             fields["rec_paused"] = True
+        if hidden:
+            fields["rec_hidden"] = hidden          # segments before rec_t that were not on the screen yet: they came after this version
         return fields
 
     def _call_llm(

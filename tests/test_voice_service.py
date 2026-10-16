@@ -607,3 +607,65 @@ async def test_the_clock_of_an_agent_turn_reads_pauses_without_working_out_the_t
         assert clock() == (7.0, True) and calls == []                     # only the pause is read again, never the transcript
     finally:
         manager.session.pipeline.__class__.upto = property(original)
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# A segment in the middle that was not on the screen is named by the version, not hidden behind a later segment's end
+# ---------------------------------------------------------------------------------------------------------------------
+async def test_a_middle_segment_that_was_background_is_named_as_not_yet_on_the_screen(patient):
+    from voice.service import Position
+    manager = make_manager()
+    manager.attach(patient, DATE)
+    await record(manager, 7)
+    pipeline = manager.session.pipeline
+    pipeline.segments[:] = [segment_of(1, 0.0, 4.0, '我頭痛三天'), segment_of(2, 4.0, 7.0, '胸痛'), segment_of(3, 7.0, 9.0, '大概三天')]
+    pipeline.speaker = OnlyBackground({2})                                  # #2 is judged to be a background voice when the physician edits
+    position = manager.recording_position(patient, DATE)
+    assert position == (9.0, True) and isinstance(position, Position) and position.hidden == (2,)
+    assert pipeline.reach_and_hidden() == (9.0, [2])
+    seconds, paused = position                                              # it still unpacks like the pair it was
+    pipeline.speaker = OnlyBackground(set())                                # judged again: #2 is foreground and appears after the edit
+    after = manager.recording_position(patient, DATE)
+    assert after.hidden == () and '胸痛' in pipeline.snapshot().text
+    # what the version kept: #2 ends at 7 s, before the 9 s of the clock, yet it is named as coming later
+
+
+async def test_only_segments_that_may_still_get_a_line_are_named(patient):
+    manager = make_manager()
+    manager.attach(patient, DATE)
+    await record(manager, 7)
+    pipeline = manager.session.pipeline
+    pipeline.segments[:] = [segment_of(1, 0.0, 3.0, ''), segment_of(2, 3.0, 5.0, '我頭痛'), segment_of(3, 5.0, 7.0, ''),
+                            segment_of(4, 7.0, 9.0, '三天了')]
+    assert pipeline.finished is True                                        # nothing is being corrected: an empty segment is silence for good
+    assert pipeline.reach_and_hidden() == (9.0, [])
+    pipeline.finished = False                                               # the rolling correction still works on the last two
+    pipeline.rolling_start = 0
+    assert pipeline.reach_and_hidden() == (9.0, [3])                        # #3 is empty and may be filled; #1 is locked: silence
+    pipeline.segments[3].corrected = ''                                     # a tail that is empty is outside the reach, not a hidden one
+    assert pipeline.reach_and_hidden() == (5.0, [])
+
+
+async def test_the_frozen_clock_and_a_session_not_loaded_carry_the_hidden_segments_too(patient):
+    first = make_manager()
+    first.attach(patient, DATE)
+    await record(first, 7)
+    paths = voice_paths(patient, DATE)
+    saved = json.loads(paths.transcript_json.read_text(encoding='utf-8'))
+    saved['segments'] = [vars(segment_of(1, 0.0, 4.0, '我頭痛三天')), vars(segment_of(2, 4.0, 7.0, '隔壁房間的說話聲')),
+                         vars(segment_of(3, 7.0, 9.0, '大概三天'))]
+    saved['speaker'] = {'status': '', 'roles_trusted': True, 'labels': {
+        '1': [[0, 5, 'doctor', '', 0]], '2': [[0, 8, 'background', '', -1]], '3': [[0, 4, 'doctor', '', 0]]}}
+    paths.transcript_json.write_text(json.dumps(saved), encoding='utf-8')
+    restarted = make_manager()
+    offline = restarted.recording_position(patient, DATE)
+    assert offline == (9.0, True) and offline.hidden == (2,)
+    restarted.attach(patient, DATE)
+    loaded = restarted.recording_position(patient, DATE)
+    assert loaded == offline and loaded.hidden == (2,)                      # loaded or not, the same answer
+    clock = restarted.frozen_clock(patient, DATE)
+    restarted.session.speaker = None
+    restarted.session.pipeline.speaker = None                               # the marks are gone: #2 would show now
+    assert restarted.recording_position(patient, DATE).hidden == ()
+    frozen = clock()
+    assert frozen == (9.0, True) and frozen.hidden == (2,)                  # the frozen clock still says #2 came later

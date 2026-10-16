@@ -406,3 +406,69 @@ def test_the_last_version_of_an_agent_turn_sits_where_the_turns_other_versions_d
     processor = make_processor(history, (99.0, False))
     processor._apply_record_changes({"note_changed": True, "at_changed": False, "turn_number": 4, "note": "e", "at": ""}, "fp", "dt")
     assert history.snapshots[-1]["rec_t"] == 99.0
+
+
+def test_a_version_keeps_the_segments_that_were_not_on_the_screen_and_the_diff_says_so():
+    from voice.service import Position
+    from Main_Agent import MainAgent
+    agent = MainAgent.__new__(MainAgent)
+    agent.rec_clock = lambda: Position(9.0, False, (2,))
+    assert agent._rec_fields() == {"rec_t": 9.0, "rec_hidden": [2]}
+    agent.rec_clock = lambda: (9.0, True)                                      # a plain pair, as before
+    assert agent._rec_fields() == {"rec_t": 9.0, "rec_paused": True}
+    history = SnapshotHistory()
+    history.push("甲", "", source="AI", rec_t=4.0)
+    history.push("乙" + HUMAN_EDIT_TAG, "", source="人類修改", rec_t=9.0, rec_hidden=[2, 5])
+    history.push("丙", "", source="AI", rec_t=9.0, rec_hidden=[])               # none hidden: nothing is stored
+    assert history.snapshots[1]["rec_hidden"] == [2, 5] and "rec_hidden" not in history.snapshots[2]
+    copy = SnapshotHistory()
+    copy.restore(history.to_dict())
+    assert copy.snapshots[1]["rec_hidden"] == [2, 5]
+    text = build_record_diff_context(history.snapshots[:2], 1)
+    assert "@錄音 00:09，逐字稿 #2、#5 當時還沒出現在畫面上（之後才出現，算修改之後）" in text
+    many = SnapshotHistory()
+    many.push("a", "", source="AI", rec_t=1)
+    many.push("b", "", source="AI", rec_t=90, rec_hidden=list(range(1, 31)))
+    assert "等共 30 段" in build_record_diff_context(many.snapshots, 1)
+
+
+def test_the_last_version_of_an_agent_turn_keeps_the_hidden_segments_of_the_turns_clock():
+    history = SnapshotHistory()
+    history.push("a", "", source="init")
+    processor = make_processor(history, (99.0, False))
+    result = {"note_changed": True, "at_changed": False, "turn_number": 3, "note": "d", "at": "",
+              "record_snapshots": [{"note": "c", "at": "", "source": "Turn 3-2 update_record", "rec_t": 40.0, "rec_hidden": [2]}]}
+    processor._apply_record_changes(result, "fp", "dt")
+    assert [snap.get("rec_hidden") for snap in history.snapshots] == [None, [2], [2]]
+
+
+TRANSCRIPT = ("【診間對話逐字稿 · 截至 01:00】\n語音#1 00:05–00:20 頭痛三天\n語音#2 00:20–00:35 家屬說最近一次檢查 HbA1c 是 7.1%\n"
+              "語音#3 00:45–01:00 好，我們再看看")
+
+
+def test_the_diff_says_which_transcript_lines_were_on_the_screen_when_a_version_was_made():
+    history = SnapshotHistory()
+    history.push("甲", "", source="AI", rec_t=10)
+    history.push("乙" + HUMAN_EDIT_TAG, "", source="人類修改", rec_t=40.7, rec_hidden=[2])         # #2 ends before 00:40, but was not shown yet
+    out = build_record_diff_context(history.snapshots, 1, voice_transcript=TRANSCRIPT)
+    assert "（版本 2 的逐字稿先後：逐字稿 #1 在畫面上，早於這個版本；逐字稿 #2~#3 晚於這個版本。）" in out
+    plain = SnapshotHistory()
+    plain.push("甲", "", source="AI", rec_t=10)
+    plain.push("乙", "", source="人類修改", rec_t=40.7)
+    assert "逐字稿 #1~#2 在畫面上，早於這個版本；逐字稿 #3 晚於這個版本" in build_record_diff_context(plain.snapshots, 1, voice_transcript=TRANSCRIPT)
+    short = SnapshotHistory()
+    short.push("甲", "", source="AI", rec_t=10)
+    short.push("乙", "", source="人類修改", rec_t=34.9)                                          # whole seconds, as the lines show them: 00:35 is later
+    assert "逐字稿 #1 在畫面上，早於這個版本；逐字稿 #2~#3 晚於這個版本" in build_record_diff_context(short.snapshots, 1, voice_transcript=TRANSCRIPT)
+    # a version made before the recording began: every line is after it; a session with no transcript lines gets no such note
+    before = SnapshotHistory()
+    before.push("甲", "", source="AI")
+    before.push("乙", "", source="人類修改")
+    assert "全部逐字稿都晚於這個版本" in build_record_diff_context(before.snapshots, 1, has_recording=True, voice_transcript=TRANSCRIPT)
+    assert "逐字稿先後" not in build_record_diff_context(history.snapshots, 1)
+    assert "逐字稿先後" not in build_record_diff_context(history.snapshots, 1, voice_transcript="【診間對話逐字稿 · 截至 00:00】\n（尚無逐字稿內容）")
+    # hours in the clock
+    long = SnapshotHistory()
+    long.push("甲", "", source="AI", rec_t=10)
+    long.push("乙", "", source="人類修改", rec_t=4000)
+    assert "逐字稿 #9 在畫面上" in build_record_diff_context(long.snapshots, 1, voice_transcript="語音#9 1:02:03–1:05:00 好")

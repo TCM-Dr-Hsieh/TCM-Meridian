@@ -68,6 +68,8 @@ def test_the_doctor_edit_principles_replace_the_old_keep_the_old_source_beside_i
         assert "被該次修正取代或明確否定的舊資訊" in text and "@錄音" in text, name
         assert "手上的逐字稿涵蓋到的時間" in text and "不是錄音機錄到的長度" in text and "`@錄音 00:00`" in text, name
         assert "那是醫師修改當下已錄下的音訊長度" not in text, name
+        assert "逐字稿 #N 當時還沒出現在畫面上" in text and "照修改之後處理" in text, name
+        assert "（版本 N 的逐字稿先後：…）" in text and "直接採用" in text, name
         assert "HbA1c 7.8%[人類醫師_手動修改]；另有紀錄 HbA1c 7.1%" not in text, name
     assert "醫師修正與資訊衝突處理原則" in read("main")
 

@@ -86,6 +86,16 @@ def _now() -> str:
     return datetime.now().isoformat(timespec='seconds')
 
 
+class Position(tuple):
+    """The recording clock: `(seconds, paused)` -- two values, so it unpacks like the pair it was -- that also carries `hidden`, the numbers of
+    the transcript segments that lie before `seconds` but were not on the screen then (see `TranscriptPipeline.reach_and_hidden`)."""
+
+    def __new__(cls, seconds, paused=False, hidden=()):
+        pair = super().__new__(cls, (seconds, paused))
+        pair.hidden = tuple(hidden)
+        return pair
+
+
 class VoiceSession:
     """The voice state of one loaded session."""
 
@@ -536,29 +546,31 @@ class VoiceManager:
         before it was visible to the physician, every later one was not."""
         found = self._find_recording(folder, date)
         if found is None:
-            return None, False
-        paused, end = found
-        return end(), paused
+            return Position(None, False)
+        paused, look = found
+        seconds, hidden = look()
+        return Position(seconds, paused, hidden)
 
     def recording_paused(self, folder: str | None = None, date: str | None = None) -> bool:
         found = self._find_recording(folder, date)
         return bool(found and found[0])
 
-    def _find_recording(self, folder: str | None, date: str | None) -> tuple[bool, Callable[[], float]] | None:
-        """None = the session has no recording; else (paused, a function that gives where the transcript on the screen ends)."""
+    def _find_recording(self, folder: str | None, date: str | None) -> tuple[bool, Callable[[], tuple[float, list[int]]]] | None:
+        """None = the session has no recording; else (paused, a function that gives where the transcript on the screen ends and which
+        segments before that are not on it)."""
         if folder is not None and not self.matches(folder, date):
             # Not the loaded session (after a restart, or a page reloaded before its voice window was opened): the recording of that
             # session is still its file. Without this a version made now would get "no recording yet", and a reviewer could take
             # the earlier transcript lines for evidence that appeared after the edit.
             if not folder or not date or not sample_count(voice_paths(folder, date).audio):
                 return None
-            return True, lambda: self._saved_transcript_end(folder, date)
+            return True, lambda: self._saved_transcript_reach(folder, date)
         session = self.session
         if session is None:
             return None
 
-        def loaded_end() -> float:
-            return session.pipeline.upto if session.pipeline is not None else 0.0
+        def loaded_end() -> tuple[float, list[int]]:
+            return session.pipeline.reach_and_hidden() if session.pipeline is not None else (0.0, [])
 
         if session.state != 'idle' and session.source is not None:
             return False, loaded_end
@@ -566,7 +578,7 @@ class VoiceManager:
             return None
         return True, loaded_end
 
-    def _saved_transcript_end(self, folder: str, date: str) -> float:
+    def _saved_transcript_reach(self, folder: str, date: str) -> tuple[float, list[int]]:
         """Where the transcript saved for a session that is not loaded ends: the session is read the way loading it would read it (the saved
         speaker marks included, which decide what is a background voice), so the answer does not change once it is loaded. Nothing is
         attached and nothing is logged."""
@@ -574,14 +586,14 @@ class VoiceManager:
         probe.emit = lambda *args, **kwargs: None
         probe._changed = lambda *args, **kwargs: None
         probe.load()
-        return probe.pipeline.upto if probe.pipeline is not None else 0.0
+        return probe.pipeline.reach_and_hidden() if probe.pipeline is not None else (0.0, [])
 
-    def frozen_clock(self, folder: str | None, date: str | None) -> Callable[[], tuple[float | None, bool]]:
+    def frozen_clock(self, folder: str | None, date: str | None) -> Callable[[], Position]:
         """The clock for the versions an agent writes during one turn. Call it where `snapshot_text` is called: the position stays where
         that frozen transcript ends. Lines that arrive while the agent works were seen neither by the physician who asked nor by the
         agent, so they are not "before" what the agent writes. Whether the recording is paused is still read live."""
-        seconds = self.recording_position(folder, date)[0]
-        return lambda: (seconds, self.recording_paused(folder, date))
+        frozen = self.recording_position(folder, date)
+        return lambda: Position(frozen[0], self.recording_paused(folder, date), frozen.hidden)
 
     @property
     def remote_token(self) -> str:

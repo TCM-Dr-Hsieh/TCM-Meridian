@@ -6,6 +6,7 @@ from typing import Any
 
 _ROUND_STEP_RE = re.compile(r"＜第\d+回合\(R(\d+)，Turn (\d+)-(\d+)\)")
 _VERSION_STEP_RE = re.compile(r"Turn (\d+)-(\d+)")
+_TRANSCRIPT_LINE_RE = re.compile(r"^語音#(\d+) (\d+(?::\d+){1,2})[–-](\d+(?::\d+){1,2})(?:\s|$)", re.M)
 
 
 def _format_clock(seconds: float) -> str:
@@ -23,7 +24,12 @@ def _recording_note(snapshot: dict[str, Any]) -> str:
     if float(rec_t) <= 0:
         return "@錄音 00:00，當時還沒有任何逐字稿" + ("，錄音暫停中" if snapshot.get("rec_paused") else "")
     paused = "，錄音暫停中" if snapshot.get("rec_paused") else ""
-    return f"@錄音 {_format_clock(float(rec_t))}{paused}"
+    hidden = [int(index) for index in snapshot.get("rec_hidden") or [] if isinstance(index, int) and not isinstance(index, bool)]
+    later = ""
+    if hidden:
+        shown = "、".join(f"#{index}" for index in hidden[:12]) + (f" 等共 {len(hidden)} 段" if len(hidden) > 12 else "")
+        later = f"，逐字稿 {shown} 當時還沒出現在畫面上（之後才出現，算修改之後）"
+    return f"@錄音 {_format_clock(float(rec_t))}{later}{paused}"
 
 
 def _snapshot_label(index: int, snapshot: dict[str, Any], with_recording: bool = False) -> str:
@@ -57,7 +63,7 @@ def _position(snapshot: dict[str, Any]) -> tuple[int, int] | None:
     return (int(match.group(1)), int(match.group(2))) if match else None
 
 
-def _round_list(numbers: list[int]) -> str:
+def _round_list(numbers: list[int], prefix: str = "R") -> str:
     """[1, 2, 3, 5] -> 'R1~R3、R5'."""
     spans: list[list[int]] = []
     for number in sorted(numbers):
@@ -65,7 +71,40 @@ def _round_list(numbers: list[int]) -> str:
             spans[-1][1] = number
         else:
             spans.append([number, number])
-    return "、".join(f"R{a}" if a == b else f"R{a}~R{b}" for a, b in spans)
+    return "、".join(f"{prefix}{a}" if a == b else f"{prefix}{a}~{prefix}{b}" for a, b in spans)
+
+
+def _clock_seconds(text: str) -> int:
+    seconds = 0
+    for part in text.split(":"):
+        seconds = seconds * 60 + int(part)
+    return seconds
+
+
+def _transcript_ends(transcript: str) -> dict[int, int]:
+    """{segment number: end in whole seconds} of the lines of a voice transcript as the prompts carry it (`語音#N mm:ss–mm:ss …`)."""
+    return {int(match.group(1)): _clock_seconds(match.group(3)) for match in _TRANSCRIPT_LINE_RE.finditer(transcript or "")}
+
+
+def _transcript_note(index: int, snapshot: dict[str, Any], ends: dict[int, int]) -> str:
+    """Which transcript lines were on the screen when this version was made and which came after, worked out from its recording clock and
+    the segments it names as not yet there, so the reviewer reads the order instead of comparing mm:ss itself."""
+    if not ends:
+        return ""
+    rec_t = snapshot.get("rec_t")
+    if rec_t is None:
+        return f"（版本 {index} 的逐字稿先後：全部逐字稿都晚於這個版本，它是錄音開始前做的。）"
+    limit = int(float(rec_t))
+    hidden = {int(item) for item in snapshot.get("rec_hidden") or [] if isinstance(item, int) and not isinstance(item, bool)}
+    before = [number for number, end in ends.items() if end <= limit and number not in hidden]
+    placed = set(before)
+    after = [number for number in ends if number not in placed]
+    parts = []
+    if before:
+        parts.append(f"逐字稿 {_round_list(before, '#')} 在畫面上，早於這個版本")
+    if after:
+        parts.append(f"逐字稿 {_round_list(after, '#')} 晚於這個版本")
+    return f"（版本 {index} 的逐字稿先後：" + "；".join(parts) + "。）"
 
 
 def _order_note(index: int, snapshot: dict[str, Any], rounds: dict[int, tuple[int, int]]) -> str:
@@ -127,6 +166,7 @@ def build_record_diff_context(
     *,
     has_recording: bool = False,
     interview_dialogue: str = "",
+    voice_transcript: str = "",
 ) -> str:
     """Format snapshot history up to current_index as plain-text diffs for LLM prompts.
 
@@ -146,6 +186,7 @@ def build_record_diff_context(
         # one reads exactly as before. A version made before the recording began then says so.
         with_recording = has_recording or any(snap.get("rec_t") is not None for snap in active_snapshots)
         rounds = _interview_steps(interview_dialogue)
+        ends = _transcript_ends(voice_transcript)
         if len(active_snapshots) < 2:
             body = "（目前只有一個版本，尚無版本間 diff）"
         else:
@@ -185,6 +226,9 @@ def build_record_diff_context(
                     order = _order_note(idx + 1, current, rounds)
                     if order:
                         parts.append(order)
+                    heard = _transcript_note(idx + 1, current, ends) if with_recording else ""
+                    if heard:
+                        parts.append(heard)
 
             body = "\n\n".join(parts) if parts else "（目前版本歷史中沒有內容差異）"
 

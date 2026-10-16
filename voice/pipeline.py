@@ -148,6 +148,18 @@ class TranscriptPipeline:
         gets then must count as appearing after the point reached now."""
         return max((s.end for s in self.segments if written.get(s.index)), default=0.0)
 
+    def reach_and_hidden(self) -> tuple[float, list[int]]:
+        """(where the transcript reaches, the segments inside that reach that are not in it now but may still get a line). The reach alone
+        cannot say that a segment in the middle is missing: a background voice judged to be a foreground one later, or a segment the rolling
+        correction has not filled yet, ends before the reach and still appears after it. A version names them, so what it was made against
+        can be told from what came later. An empty segment that is locked is silence for good and is not listed."""
+        written = self._written(self._marked())
+        reach = self._reach(written)
+        pending = set(self.unlocked_indexes())
+        hidden = [s.index for s in self.segments
+                  if s.kind == 'speech' and s.end <= reach and not written.get(s.index) and (s.visible or s.index in pending)]
+        return reach, hidden
+
     @property
     def upto(self) -> float:
         """Where the transcript reaches (the `截至 mm:ss` of a snapshot). The recording clock of a record version is this, so what the

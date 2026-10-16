@@ -286,17 +286,17 @@ def test_a_manual_edit_is_stamped_with_the_main_turns_so_far_and_the_diff_says_s
     fresh.c.on_edit_done()
     assert fresh.history.get_current()["after_turn"] == 0
     assert "尚無任何主輪" in build_record_diff_context(fresh.history.snapshots, fresh.history.current_index)
-    # a version nobody stamped (the AI's own, old sessions) shows nothing of the kind
+    # the agents' own versions are not stamped (their source already says `Turn X-Y`)
     assert "主輪之後" not in build_record_diff_context(make().history.snapshots, 0)
 
 
-def test_interview_rounds_carry_the_main_turn_that_started_them_when_it_is_known():
+def test_interview_rounds_carry_the_main_turn_that_started_them():
     from ui_app.rendering import format_interview_conversations
     text = format_interview_conversations([
         {"role": "subagent", "content": "哪裡不舒服？", "round": 1, "turn": 2},
         {"role": "patient", "content": "頭痛", "round": 1, "turn": 2},
-        {"role": "subagent", "content": "多久了？", "round": 2},                # an old session: no turn recorded
-        {"role": "patient", "content": "三天", "round": 2, "turn": None},
+        {"role": "subagent", "content": "多久了？", "round": 2, "turn": 3},
+        {"role": "patient", "content": "三天", "round": 2, "turn": 3},
     ])
     assert "＜第1回合(R1，Turn 2)助理提問＞：哪裡不舒服？" in text and "＜第1回合(R1，Turn 2)收到回應＞：頭痛" in text
-    assert "＜第2回合(R2)助理提問＞：多久了？" in text and "＜第2回合(R2)收到回應＞：三天" in text
+    assert "＜第2回合(R2，Turn 3)助理提問＞：多久了？" in text and "＜第2回合(R2，Turn 3)收到回應＞：三天" in text

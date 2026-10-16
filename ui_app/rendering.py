@@ -84,8 +84,7 @@ def format_interview_conversations(conversations: list[dict]) -> str:
     parts: list[str] = []
     for msg in conversations:
         round_num = msg.get("round", "?")
-        turn = msg.get("turn")
-        label = f"R{round_num}，Turn {turn}" if isinstance(turn, int) and turn > 0 else f"R{round_num}"
+        label = f"R{round_num}，Turn {msg.get('turn', 0)}"
         if msg["role"] == "subagent":
             parts.append(f"＜第{round_num}回合({label})助理提問＞：{msg['content']}")
         elif msg["role"] == "patient":

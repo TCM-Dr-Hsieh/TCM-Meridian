@@ -95,7 +95,7 @@ def test_the_three_reviewing_prompts_order_edits_against_interviews_and_files_by
     for name in ("record", "hallucination", "lc"):
         text = read(name)
         assert "主輪編號" in text and "第 N 主輪之後" in text and "尚無任何主輪" in text, name
-        assert "必然晚於版本歷史中所有人工修改" in text and "回合標頭沒有 `Turn` 標示" in text, name
+        assert "必然晚於版本歷史中所有人工修改" in text, name
         assert "只依問診紀錄與檔案取得的先後判斷" not in text, name
 
 

@@ -663,8 +663,7 @@ class AutoInterviewController:
 
         ic_sub = self.interview_state.get_subagent()
         # The interview belongs to the Main Agent turn that started it (it ends by resuming that same turn): its rounds are stamped with it.
-        started_by = self.agent_run_state.get_agent()
-        ic_sub.current_turn = getattr(started_by, "turn_count", None)
+        ic_sub.current_turn = self.agent_run_state.get_agent().turn_count
         self.app_state["_ic_rollback_point"] = {
             "all_conversations_len": len(getattr(ic_sub, "all_conversations", [])),
             "dialogue_round": getattr(ic_sub, "dialogue_round", 0),

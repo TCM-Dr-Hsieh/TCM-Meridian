@@ -281,7 +281,7 @@ class InformationCollectionSubagent:
         self.conversation = []
         self.all_conversations = []
         self.dialogue_round = 0
-        self.current_turn: int | None = None            # the Main Agent turn that started this interview (set by the UI)
+        self.current_turn = 0                           # the Main Agent turn that started this interview (set by the UI)
         self.turn_count = 0
         self.turn_history = []
         self.guidelines = ""

@@ -72,6 +72,19 @@ class TranscriptSnapshot:
     marked: bool = False   # the lines carry speaker marks
 
 
+def load_segments(rows) -> list[Segment]:
+    """Segments from the rows `to_json()` saved (fields this version does not know are ignored)."""
+    names = {item.name for item in fields(Segment)}
+    return [Segment(**{k: v for k, v in row.items() if k in names}) for row in rows or []]
+
+
+def visible_end(segments) -> float:
+    """Where a transcript reaches: the end of its latest segment that has text to show. A segment still without text (the window held only
+    the overlap that was transcribed before, or the recognizer returned nothing) is not on the screen and not in what the agents receive,
+    and its text may still come with the rolling correction: lines it gets later must count as appearing after the point reached now."""
+    return max((s.end for s in segments if s.visible), default=0.0)
+
+
 def gap_marker(start: float, end: float) -> str:
     return f'【音訊可能缺漏 {format_clock(start)}–{format_clock(end)}】'
 
@@ -111,8 +124,7 @@ class TranscriptPipeline:
 
     def restore(self, data: dict):
         """Load a transcript saved by `to_json()` (after a restart). The result is a finished transcript that `begin_run` can continue."""
-        names = {item.name for item in fields(Segment)}
-        self.segments = [Segment(**{k: v for k, v in row.items() if k in names}) for row in data.get('segments', [])]
+        self.segments = load_segments(data.get('segments', []))
         revision_names = {item.name for item in fields(Revision)}
         self.revisions = [Revision(**{k: v for k, v in row.items() if k in revision_names}) for row in data.get('revisions', [])]
         self.rolling_start = len(self.segments)
@@ -136,8 +148,9 @@ class TranscriptPipeline:
 
     @property
     def upto(self) -> float:
-        """Where the transcript reaches: the end of its latest segment (the `截至 mm:ss` of a snapshot)."""
-        return max((s.end for s in self.segments), default=0.0)
+        """Where the transcript reaches (the `截至 mm:ss` of a snapshot): the end of its latest segment that has text. The recording clock of a
+        record version is this, so what the clock says was on the screen is what a snapshot taken then would hold."""
+        return visible_end(self.segments)
 
     def snapshot(self) -> TranscriptSnapshot:
         marked = self.speaker is not None and self.speaker.marks_in_text and self.speaker.settings.use_in_jobs

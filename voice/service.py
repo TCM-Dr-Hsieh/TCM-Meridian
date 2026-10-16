@@ -37,7 +37,7 @@ from .config import VoiceSettings, resolve_path
 from .corrector import TranscriptCorrector
 from .fileio import atomic_write_json, atomic_write_text
 from .llm import LLMCaller, LLMClient
-from .pipeline import TranscriptPipeline
+from .pipeline import TranscriptPipeline, load_segments, visible_end
 from .remote import RemoteAudioSource
 from .speaker.embedder import load_embedder
 from .speaker.service import SpeakerService
@@ -87,10 +87,11 @@ def _now() -> str:
 
 
 def _saved_transcript_end(path: Path) -> float:
-    """Where the transcript saved for a session ends (0.0 when there is none or the file is unreadable)."""
+    """Where the transcript saved for a session ends (0.0 when there is none or the file is unreadable): the same rule as a loaded
+    transcript, so the answer does not change when the session is loaded."""
     try:
         data = json.loads(path.read_text(encoding='utf-8'))
-        return max((float(row['end']) for row in data.get('segments') or []), default=0.0)
+        return visible_end(load_segments(data.get('segments')))
     except (OSError, ValueError, TypeError, KeyError, AttributeError):
         return 0.0
 

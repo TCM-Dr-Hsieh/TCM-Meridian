@@ -502,3 +502,42 @@ async def test_the_clock_of_an_agent_turn_stays_where_the_frozen_transcript_ends
     assert before_recording() == (None, False)
     await record(manager, 3)                                    # a recording that began during the turn is not "before" its versions
     assert before_recording()[0] is None and manager.recording_position(str(other), DATE)[0] == 3.0
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# A segment without text is not on the screen: the clock stops at the last one that has
+# ---------------------------------------------------------------------------------------------------------------------
+def segment_of(index, start, end, text):
+    from voice.pipeline import Segment
+    return Segment(index, 'speech', start, end, start, text, text, text, text)
+
+
+async def test_the_clock_ignores_segments_that_have_no_text_yet(patient):
+    manager = make_manager()
+    manager.attach(patient, DATE)
+    await record(manager, 7)
+    pipeline = manager.session.pipeline
+    pipeline.segments[:] = [segment_of(1, 0.0, 4.0, '我頭痛三天'), segment_of(2, 4.0, 7.0, '')]       # the 3 s tail is still empty
+    assert pipeline.upto == 4.0 and pipeline.snapshot().upto == 4.0 and '截至 00:04' in pipeline.snapshot().text
+    assert manager.recording_position(patient, DATE) == (4.0, True)
+    pipeline.segments[:] = [segment_of(1, 0.0, 9.0, '')]                  # a window that added nothing: no text at all
+    assert manager.snapshot_text(patient, DATE) == ''                    # the agents get no transcript ...
+    assert manager.recording_position(patient, DATE) == (0.0, True)       # ... and the clock does not claim 9 s of it
+    pipeline.segments[:] = [segment_of(1, 0.0, 4.0, '我頭痛三天'), segment_of(2, 4.0, 7.0, '')]
+    pipeline.segments[1].corrected = '還有發燒'                           # the correction fills the tail in later: it lies after 4 s
+    assert pipeline.upto == 7.0 and manager.recording_position(patient, DATE) == (7.0, True)
+
+
+async def test_a_session_gives_the_same_position_loaded_or_not_loaded(patient):
+    first = make_manager()
+    first.attach(patient, DATE)
+    await record(first, 7)
+    rows = [segment_of(1, 0.0, 4.0, '我頭痛三天'), segment_of(2, 4.0, 7.0, '')]
+    first.session.pipeline.segments[:] = rows
+    first.session.flush()
+    loaded = first.recording_position(patient, DATE)
+    restarted = make_manager()                                            # nothing attached: the saved file answers
+    assert restarted.session is None
+    assert restarted.recording_position(patient, DATE) == loaded == (4.0, True)
+    restarted.attach(patient, DATE)                                       # now loaded from the same file
+    assert restarted.recording_position(patient, DATE) == loaded

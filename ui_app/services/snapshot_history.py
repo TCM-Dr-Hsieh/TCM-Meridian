@@ -22,8 +22,9 @@ class SnapshotHistory:
         meta: dict | None = None,
         after_turn: int | None = None,
     ) -> list[dict]:
-        """Add a version. `rec_t` is the recording clock (seconds recorded so far in this session) when the version was made:
-        it orders the version against the voice transcript. None = this session had no recording yet.
+        """Add a version. `rec_t` is the recording clock when the version was made: where the voice transcript that could be seen then ended
+        (seconds of the recording), which orders the version against the transcript lines. 0 = a recording, but no transcript
+        yet; None = this session had no recording yet.
         `after_turn`: how many Main Agent turns had been started when a physician edited by hand (0 = none yet): the edit lies after
         that turn and before the next one, which orders it against the interview rounds and the agents' own versions (`Turn X-Y`).
         `meta`: what a physician edit took away (`removed_tags`, `dropped_marks`), kept with the version for the audit and the diff."""

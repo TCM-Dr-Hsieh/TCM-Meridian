@@ -134,11 +134,16 @@ class TranscriptPipeline:
         start = max(self.rolling_start, len(self.segments) - 2)
         return [s.index for s in self.segments[start:] if s.kind == 'speech']
 
+    @property
+    def upto(self) -> float:
+        """Where the transcript reaches: the end of its latest segment (the `截至 mm:ss` of a snapshot)."""
+        return max((s.end for s in self.segments), default=0.0)
+
     def snapshot(self) -> TranscriptSnapshot:
         marked = self.speaker is not None and self.speaker.marks_in_text and self.speaker.settings.use_in_jobs
         written = {s.index: self.line(s, marked) for s in self.segments if s.visible}
         lines = '\n'.join(line for line in written.values() if line)         # a segment of nothing but background voices has no line
-        upto = max((s.end for s in self.segments), default=0.0)
+        upto = self.upto
         unlocked = [i for i in self.unlocked_indexes() if written.get(i, True)]
         pending = self.pending if not self.finished else 0
         header = f'【診間對話逐字稿 · 截至 {format_clock(upto)}'

@@ -581,7 +581,7 @@ class AutoInterviewController:
         # 問診期間錄音可能仍在進行：恢復時重新取一份最新的診間對話逐字稿（編號只會往後增加）。
         voice_manager = self.app_state.get("_voice_manager")
         voice_transcript = voice_manager.snapshot_text(fp, dt) if voice_manager is not None else None
-        rec_clock = (lambda: voice_manager.recording_position(fp, dt)) if voice_manager is not None else None
+        rec_clock = voice_manager.frozen_clock(fp, dt) if voice_manager is not None else None
 
         def log_cb(msg):
             self.write_session_log(fp, dt, msg)

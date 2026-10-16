@@ -235,6 +235,12 @@ def test_the_diff_the_agents_read_orders_edits_against_the_transcript_and_says_w
     mixed.push("a", "", source="AI")
     mixed.push("b", "", source="AI", rec_t=3)
     assert "尚未錄音" in build_record_diff_context(mixed.snapshots, mixed.current_index)
+    # a version made while a recording ran but nothing was transcribed yet is not "not recorded": it says there was no transcript
+    started = SnapshotHistory()
+    started.push("a", "", source="AI", rec_t=0)
+    started.push("b", "", source="人類修改", rec_t=0, rec_paused=False)
+    text = build_record_diff_context(started.snapshots, started.current_index)
+    assert "@錄音 00:00，當時還沒有任何逐字稿" in text and "尚未錄音" not in text
 
 
 def test_the_reference_html_escapes_text_shows_tags_light_and_marks_bold():
@@ -372,3 +378,31 @@ def test_the_diff_says_which_interview_rounds_came_before_and_after_each_version
         first.snapshots, first.current_index, interview_dialogue=dialogue)
     # without interview rounds there is nothing to say
     assert "的先後" not in build_record_diff_context(history.snapshots, history.current_index)
+
+
+def make_processor(history, live_position):
+    from ui_app.controllers.main_agent_result_processor import MainAgentResultProcessor
+    nothing = lambda *args, **kwargs: None
+    return MainAgentResultProcessor(
+        app_state={"_voice_manager": SimpleNamespace(recording_position=lambda fp, dt: live_position)}, ui_state={}, history=history,
+        agent_run_state=None, live_steps=None, main_chat_input=None, agent_status=None, save_current_to_disk=nothing, update_display=nothing,
+        update_buttons=nothing, render_chat=nothing, write_session_log=nothing, save_chat_state=nothing, save_forum_state=nothing,
+        save_conversation_file=nothing, record_snapshot_store=SimpleNamespace(append_audit_event=nothing))
+
+
+def test_the_last_version_of_an_agent_turn_sits_where_the_turns_other_versions_do():
+    history = SnapshotHistory()
+    history.push("a", "", source="init")
+    processor = make_processor(history, (99.0, False))                       # the live end of the transcript, far ahead
+    result = {"note_changed": True, "at_changed": False, "turn_number": 3, "note": "d", "at": "",
+              "record_snapshots": [{"note": "b", "at": "", "source": "Turn 3-1 update_record", "rec_t": 40.0, "rec_paused": True},
+                                   {"note": "c", "at": "", "source": "Turn 3-2 update_record", "rec_t": 40.0, "rec_paused": True}]}
+    processor._apply_record_changes(result, "fp", "dt")
+    assert [snap.get("rec_t") for snap in history.snapshots] == [None, 40.0, 40.0, 40.0]
+    assert history.snapshots[-1]["rec_paused"] is True
+    # a turn that left no version of its own (nothing stamped): the live position
+    history = SnapshotHistory()
+    history.push("a", "", source="init")
+    processor = make_processor(history, (99.0, False))
+    processor._apply_record_changes({"note_changed": True, "at_changed": False, "turn_number": 4, "note": "e", "at": ""}, "fp", "dt")
+    assert history.snapshots[-1]["rec_t"] == 99.0

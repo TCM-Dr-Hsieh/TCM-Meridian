@@ -222,7 +222,7 @@ The left column's "Voice" button opens a floating window (draggable and resizabl
 - **While recording**: you cannot switch or leave the patient / visit date or delete the session; everything else (talking to the Main Agent, editing the record) works. After a restart the old speaker marks are kept but the voice clusters start again.
 
 The transcript (with times and speaker marks) is appended after the "full interview record" in the prompts of the **Main Agent, record writer, hallucination reviewer, low-confidence annotator and note reviewer**; the interview assistant and the professors do **not** receive it. The source tags `[語音#N]`, `[語音#N-M]`, `[語音#N, #M]` point to transcript segment numbers. Examination findings (tongue, pulse, blood pressure …) can be dictated or typed; when the transcript has none, the record says "未知（未口述，待醫師輸入）" and never "not examined".
-Each record version stores how much audio had been recorded when it was made (`@錄音 mm:ss`), so the agents can tell whether a physician's edit came before or after a transcript line.
+Each record version stores how far the transcript on screen reached when it was made (`@錄音 mm:ss`; not the length of the audio, which runs ahead of the transcript), so the agents can tell whether a physician's edit came before or after a transcript line.
 
 Settings are in the Model Settings tab: speech recognition (model folders, device, microphone, window and overlap, vocabulary), the transcript-correction LLM (API URL, key, model; empty = no correction) and speaker marking (with advanced parameters). They can only be saved while no patient is loaded. The correction LLM is called once per recognised window, in parallel with the agents, so make sure your LLM server can handle several requests at once.
 

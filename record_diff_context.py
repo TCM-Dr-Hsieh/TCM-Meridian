@@ -20,6 +20,8 @@ def _recording_note(snapshot: dict[str, Any]) -> str:
     rec_t = snapshot.get("rec_t")
     if rec_t is None:
         return "尚未錄音"
+    if float(rec_t) <= 0:
+        return "@錄音 00:00，當時還沒有任何逐字稿" + ("，錄音暫停中" if snapshot.get("rec_paused") else "")
     paused = "，錄音暫停中" if snapshot.get("rec_paused") else ""
     return f"@錄音 {_format_clock(float(rec_t))}{paused}"
 

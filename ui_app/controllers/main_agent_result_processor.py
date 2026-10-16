@@ -84,7 +84,13 @@ class MainAgentResultProcessor:
                 pushed += 1
 
         final_source = f"Agent Turn {result.get('turn_number', '?')}"
-        rec_t, rec_paused = self._recording_position(fp, dt)
+        # the last version of the turn sits where the turn's other versions do (the transcript the agent was given), not at the live end
+        snapshots = result.get("record_snapshots") or []
+        last = snapshots[-1] if snapshots and isinstance(snapshots[-1], dict) else {}
+        if last.get("rec_t") is not None:
+            rec_t, rec_paused = last["rec_t"], bool(last.get("rec_paused"))
+        else:
+            rec_t, rec_paused = self._recording_position(fp, dt)
         if self._push_record_snapshot(result["note"], result["at"], final_source, fp, dt, rec_t=rec_t, rec_paused=rec_paused):
             pushed += 1
 

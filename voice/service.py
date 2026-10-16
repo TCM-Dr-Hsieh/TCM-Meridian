@@ -86,6 +86,15 @@ def _now() -> str:
     return datetime.now().isoformat(timespec='seconds')
 
 
+def _saved_transcript_end(path: Path) -> float:
+    """Where the transcript saved for a session ends (0.0 when there is none or the file is unreadable)."""
+    try:
+        data = json.loads(path.read_text(encoding='utf-8'))
+        return max((float(row['end']) for row in data.get('segments') or []), default=0.0)
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        return 0.0
+
+
 class VoiceSession:
     """The voice state of one loaded session."""
 
@@ -529,23 +538,35 @@ class VoiceManager:
         return pipeline.snapshot().text
 
     def recording_position(self, folder: str | None = None, date: str | None = None) -> tuple[float | None, bool]:
-        """(seconds recorded so far, paused). `None` seconds = this session has no recording. The clock only grows (the file is
-        appended to), so it orders a manual edit against the transcript lines: an edit is later than every line before it."""
+        """(where the transcript that can be seen now ends, paused), in seconds of the recording: the `截至 mm:ss` of a snapshot.
+        It is not the length of the audio: the windows still being recognized and corrected are not on the screen, and a physician
+        who edits the record has read only what is. `None` seconds = this session has no recording; 0.0 = it has one but nothing is
+        transcribed yet. The clock only grows, so it orders a manual edit against the transcript lines: every line that ends at or
+        before it was visible to the physician, every later one was not."""
         if folder is not None and not self.matches(folder, date):
             # Not the loaded session (after a restart, or a page reloaded before its voice window was opened): the recording of that
             # session is still its file. Without this a version made now would get "no recording yet", and a reviewer could take
             # the earlier transcript lines for evidence that appeared after the edit.
             if not folder or not date:
                 return None, False
-            samples = sample_count(voice_paths(folder, date).audio)
-            return (samples / RATE, True) if samples else (None, False)
+            paths = voice_paths(folder, date)
+            return (_saved_transcript_end(paths.transcript_json), True) if sample_count(paths.audio) else (None, False)
         session = self.session
         if session is None:
             return None, False
+        pipeline = session.pipeline
         if session.state != 'idle' and session.source is not None:
-            return session.source.audio_time, False
-        samples = sample_count(session.paths.audio)
-        return (samples / RATE, True) if samples else (None, False)
+            return (pipeline.upto if pipeline is not None else 0.0), False
+        if not sample_count(session.paths.audio):
+            return None, False
+        return (pipeline.upto if pipeline is not None else 0.0), True
+
+    def frozen_clock(self, folder: str | None, date: str | None) -> Callable[[], tuple[float | None, bool]]:
+        """The clock for the versions an agent writes during one turn. Call it where `snapshot_text` is called: the position stays where
+        that frozen transcript ends. Lines that arrive while the agent works were seen neither by the physician who asked nor by the
+        agent, so they are not "before" what the agent writes. Whether the recording is paused is still read live."""
+        seconds = self.recording_position(folder, date)[0]
+        return lambda: (seconds, self.recording_position(folder, date)[1])
 
     @property
     def remote_token(self) -> str:

@@ -433,3 +433,72 @@ async def test_a_display_only_speaker_service_follows_use_in_jobs_every_time_it_
     settings.speaker.use_in_jobs = True
     await record(manager, 4)
     assert first.settings.use_in_jobs is True
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# The recording clock is where the transcript on the screen ends, not the length of the audio
+# ---------------------------------------------------------------------------------------------------------------------
+async def test_the_clock_is_where_the_visible_transcript_ends_not_the_length_of_the_audio(patient):
+    manager = make_manager()
+    manager.attach(patient, DATE)
+    await record(manager, 7)
+    pipeline = manager.session.pipeline
+    assert sample_count(voice_paths(patient, DATE).audio) == 7 * RATE
+    assert pipeline.upto == 7.0 and manager.recording_position(patient, DATE) == (7.0, True)
+    last = pipeline.segments.pop()                              # 7 s of audio, but the last window is not on the screen yet
+    assert last.end == 7.0 and 0 < pipeline.upto < 7.0
+    assert manager.recording_position(patient, DATE) == (pipeline.upto, True)
+    assert pipeline.snapshot().upto == pipeline.upto            # the header of a frozen snapshot ("截至 mm:ss") says the same
+    pipeline.segments.clear()                                   # a recording, but nothing transcribed: 0, not "never recorded"
+    assert manager.recording_position(patient, DATE) == (0.0, True)
+    manager.session.pipeline = None
+    assert manager.recording_position(patient, DATE) == (0.0, True)
+
+
+async def test_while_recording_the_clock_follows_the_transcript_not_the_microphone(patient):
+    manager = make_manager(seconds_per_recording=60)
+    manager.attach(patient, DATE)
+    await manager.start()
+    try:
+        pipeline = manager.session.pipeline
+        seconds, paused = manager.recording_position(patient, DATE)
+        assert paused is False and seconds == (pipeline.upto if pipeline is not None else 0.0)
+        assert seconds <= manager.session.source.audio_time
+    finally:
+        await manager.stop()
+
+
+async def test_the_position_of_a_session_that_is_not_loaded_follows_its_saved_transcript(patient):
+    first = make_manager()
+    first.attach(patient, DATE)
+    await record(first, 7)
+    paths = voice_paths(patient, DATE)
+    saved = json.loads(paths.transcript_json.read_text(encoding='utf-8'))
+    first_end = saved['segments'][0]['end']
+    saved['segments'].pop()
+    paths.transcript_json.write_text(json.dumps(saved), encoding='utf-8')
+    restarted = make_manager()
+    assert restarted.session is None
+    assert restarted.recording_position(patient, DATE) == (first_end, True) and first_end < 7.0
+    paths.transcript_json.write_text('not json', encoding='utf-8')               # a damaged file: a recording with no transcript
+    assert restarted.recording_position(patient, DATE) == (0.0, True)
+    paths.transcript_json.unlink()
+    assert restarted.recording_position(patient, DATE) == (0.0, True)
+
+
+async def test_the_clock_of_an_agent_turn_stays_where_the_frozen_transcript_ends(patient, tmp_path):
+    from pathlib import Path
+    manager = make_manager()
+    manager.attach(patient, DATE)
+    await record(manager, 7)
+    clock = manager.frozen_clock(patient, DATE)                 # taken where the turn takes its transcript
+    assert clock() == (7.0, True)
+    await record(manager, 4)                                    # the recording goes on while the agent works
+    assert manager.recording_position(patient, DATE) == (11.0, True) and clock() == (7.0, True)
+    other = Path(patient).with_name('B456_1990-02-02_李')
+    other.mkdir()
+    manager.attach(str(other), DATE)
+    before_recording = manager.frozen_clock(str(other), DATE)
+    assert before_recording() == (None, False)
+    await record(manager, 3)                                    # a recording that began during the turn is not "before" its versions
+    assert before_recording()[0] is None and manager.recording_position(str(other), DATE)[0] == 3.0

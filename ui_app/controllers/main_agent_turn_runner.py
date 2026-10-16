@@ -53,7 +53,7 @@ class MainAgentTurnRunner:
         # 診間對話逐字稿：這個主輪開始時凍結一份，交給本主輪的所有子 Agent（語音錄音可以同時進行，編號只會往後增加）。
         voice_manager = self.app_state.get("_voice_manager")
         voice_transcript = voice_manager.snapshot_text(fp, dt) if voice_manager is not None else ""
-        rec_clock = (lambda: voice_manager.recording_position(fp, dt)) if voice_manager is not None else None
+        rec_clock = voice_manager.frozen_clock(fp, dt) if voice_manager is not None else None          # versions of this turn sit where the frozen transcript ends
         generation = self.agent_run_state.current_generation()
 
         def log_cb(msg):

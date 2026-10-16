@@ -50,6 +50,10 @@ class MainAgentTurnRunner:
         last_visit = self.get_last_visit_content(fp, dt)
         hist_summary = self.load_history_summary(fp, dt)
         interview_dialogue = get_interview_state(self.app_state).get_dialogue()
+        # 診間對話逐字稿：這個主輪開始時凍結一份，交給本主輪的所有子 Agent（語音錄音可以同時進行，編號只會往後增加）。
+        voice_manager = self.app_state.get("_voice_manager")
+        voice_transcript = voice_manager.snapshot_text(fp, dt) if voice_manager is not None else ""
+        rec_clock = (lambda: voice_manager.recording_position(fp, dt)) if voice_manager is not None else None
         generation = self.agent_run_state.current_generation()
 
         def log_cb(msg):
@@ -86,6 +90,8 @@ class MainAgentTurnRunner:
                 record_history_current_index=record_history_current_index,
                 on_step=on_step,
                 log_callback=log_cb,
+                voice_transcript=voice_transcript,
+                rec_clock=rec_clock,
             ),
         )
         return result, generation

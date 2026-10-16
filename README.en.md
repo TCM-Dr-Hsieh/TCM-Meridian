@@ -31,6 +31,8 @@ You may also use the **Cite this repository** button on the GitHub repository pa
 ## Features
 
 - **Clinical workflow**: file-based patient and visit-session management, a three-column workstation, record browsing/editing, and snapshot version control with undo / redo / diff. Version history is persisted in the session log folder, so diff/undo/redo continue after exiting and reloading the same visit date. Overwritten redo branches and external file states are kept as audit events. Human manual edits are marked with `[人類醫師_手動修改]` without duplicate stacking on the same line, and visit dates include a 50-character NOTE summary index.
+- **Voice input**: the left column's "Voice" button opens a draggable floating window that records the consultation in the background and transcribes it live (Qwen3-ASR + ForcedAligner on the GPU), corrects it with an LLM, and can mark who speaks (physician / patient or family / unknown). The transcript follows the "full interview record" in the prompts of the Main Agent, the record writer, the hallucination reviewer, the low-confidence annotator and the note reviewer, with the source tag `[語音#N]`. It supports the local microphone and "this browser's microphone" (remote / phone, HTTPS required) and replay from any segment. One session = one WAV; recording can be stopped and continued. Without the speech models this feature is unavailable and everything else works unchanged. See "Voice feature" below.
+- **Source tags hidden while editing**: in edit mode the boxes do not show source tags (`[問診紀錄_…]`, `[語音#N]` …) or the bold low-confidence marks; they are put back on save, a tag is removed when the words it covered are gone, and a "reference version" window shows the original.
 - **Multi-agent collaboration**: a ReAct-style Main Agent coordinates record registration, hallucination review, low-confidence annotation, note review, interview assistance, and Professor ReAct/RAG subagents through strict JSON contracts. Each professor generates its own retrieval query -> prefix classification -> retrieval -> RRF -> rerank -> answer. The system can read patient images and text files, and records agent behavior in a timeline. Record-version evolution is injected into the Main Agent and relevant subagent prompts as a plain-text "medical record diff history", allowing agents to see which step caused each version change.
 - **Safety-oriented design**: fail-closed hallucination review, no write on review failure or service error; fail-closed professor consultation, where any error returned by the professor keeps the answer out of the forum so error text is never treated as professor opinion; atomic line-level record operations with all-or-nothing validation; source attribution; cooperative interruption that reaches into the professor ReAct loop, retrieval, and reranking; busy-state locks; and global-setting locks. Research control modes are available by setting hallucination/low-confidence detection strength to `0`, or the professor's `max_retrievals_per_answer` to `0` to disable knowledge-base retrieval.
 - **Engineering robustness**: atomic writes for important files, session-state save/restore for chat/interview/forum/professor memory/RAG traces/behavior logs, and independently configurable API endpoints for Main Agent submodels.
@@ -93,16 +95,22 @@ Storage Layer
 ├── agent_behavior_log.py
 ├── deidentification_utils.py
 ├── multimodal_utils.py
-├── record_edit_tags.py
+├── record_edit_tags.py        # hide / restore / remove source tags when editing the record
 ├── record_diff_context.py
 ├── prompt_*.txt
 ├── Record_Template.txt
 ├── config.json
 ├── requirements.txt
+├── requirements-asr.txt       # speech-recognition environment (.venv-asr, CUDA PyTorch)
+├── requirements-dev.txt       # development only (pytest)
 ├── constraints.txt            # Tested, pinned package versions (used by the installer)
+├── NOTICE                     # licenses of third-party packages and models
 ├── install.cmd / setup.ps1    # One-click install (Windows)
 ├── start.cmd / start.ps1      # One-click start (Windows)
-├── tools/doctor.py            # Environment health check
+├── tools/doctor.py            # Environment health check (incl. speech environment and models)
+├── tools/download_models.py   # Download the speech models (pinned revisions, resumable)
+├── voice/                     # Voice feature: recording, ASR, transcript, speaker marking, remote microphone, replay
+├── tests/                     # pytest (voice and record editing; development only)
 ├── SPEC.md
 ├── ui_app/
 │   ├── context.py
@@ -128,7 +136,8 @@ Storage Layer
 - The Main Agent and subagents require an OpenAI-compatible chat API.
 - Professor ReAct/RAG requires an OpenAI-compatible embedding endpoint.
 - LM Studio, OpenRouter, or other compatible services can be used.
-- No GPU is needed and no model is downloaded: every LLM and embedding call goes through an API.
+- The main features need no GPU and download no model: every LLM and embedding call goes through an API.
+- Only the **voice feature** runs speech recognition locally: it needs an NVIDIA GPU (driver 570 or newer) and about 6.1 GB of speech models. Everything else works without them.
 
 Install dependencies manually (the one-click installer already does this; see the next section):
 
@@ -152,13 +161,13 @@ Main packages:
 
 **No pre-installed conda or Python environment is required.**
 
-1. Double-click `install.cmd` (or run `.\setup.ps1` in PowerShell). It runs: preflight (OS, disk space, network) -> find Python 3.12 (if missing, installs it with winget **after asking you**, for the current user only) -> create a project-local `.venv` and install the tested package versions from `constraints.txt` -> create `config.json` from `config.example.json` when it does not exist (**an existing one is never overwritten**) -> health check (`tools\doctor.py`). It can be re-run safely: finished steps are skipped. The log is written to `setup.log`.
+1. Double-click `install.cmd` (or run `.\setup.ps1` in PowerShell). It runs: preflight (OS, disk space, network) -> find Python 3.12 (if missing, installs it with winget **after asking you**, for the current user only) -> create a project-local `.venv` and install the tested package versions from `constraints.txt` -> create the separate speech-recognition environment `.venv-asr` (CUDA PyTorch, about 4 GB; created whether or not you install the voice feature) -> create `config.json` from `config.example.json` when it does not exist (**an existing one is never overwritten**) -> download the speech models (about 6.1 GB, **only if you choose the voice feature**) -> health check (`tools\doctor.py`). At the start it asks whether to install the voice feature; `-Yes` asks nothing and installs it, `-Voice` / `-NoVoice` decide directly. If you choose it on a machine without an NVIDIA GPU (or with an old driver) it stops and explains: add `-NoVoice`, or `-SkipGpuCheck` to install anyway (recognition is very slow on CPU). Disk space: about 12 GB (environments only) / 20 GB (with the speech models). It can be re-run safely: finished steps are skipped. The log is written to `setup.log`.
 2. Double-click `start.cmd` (or `.\start.ps1`). The browser opens `http://localhost:8080` automatically.
 3. In the Model Settings tab, enter each agent's API URL, key, and model name. To use a professor's knowledge base, set an embedding model in the Professor Settings tab and click "Build Database". The installer does **not** configure any LLM and does **not** build vector indexes.
 
 Notes:
 
-- If running `.\setup.ps1` directly is blocked by the execution policy, use `powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1` (`install.cmd` already does). Add `-Force` to rebuild `.venv`, or `-SkipDoctor` to skip the health check.
+- If running `.\setup.ps1` directly is blocked by the execution policy, use `powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1` (`install.cmd` already does). Add `-Force` to rebuild `.venv` and `.venv-asr`, `-SkipDoctor` to skip the health check, `-ModelsDir` to choose the model folder, `-HfEndpoint` for a Hugging Face mirror, or `-Dev` to also install pytest.
 - Keep the project path short to stay clear of the 260-character Windows path limit (the script warns when the path is long and long-path support is disabled).
 - Re-run the health check at any time: `.venv\Scripts\python.exe tools\doctor.py` (it only checks the environment, files, and configuration; it never contacts any model server and never prints API keys).
 - One-click start does **not** use NiceGUI's auto-reload (a development feature). For development with auto-reload, run `python TCM_Meridian_main.py` directly.
@@ -202,9 +211,28 @@ Running `python TCM_Meridian_main.py` directly binds to `0.0.0.0:8080` by defaul
 - [Tutorial 6](https://youtu.be/RmMTa5AmJC4)
 - [Tutorial 7](https://youtu.be/NOhvOksdKeI)
 
+## Voice feature
+
+The left column's "Voice" button opens a floating window (draggable and resizable; closing it does **not** stop the recording; the other pages and operations keep working):
+
+- **Start / Stop recording**: one session has one recording file (`log/<date>-log/<date>-voice.wav`); starting again after a stop continues in the same file and the transcript numbering goes on. Stopping first finishes recognising what was already recorded.
+- **Transcript list**: each segment shows `#number mm:ss` and the recognised text; click the number to open the replay window from that segment. The newest two segments may still be being corrected (they are valid sources).
+- **Microphone**: "local microphone" is the computer running the program; "this browser's microphone" is recorded by the browser that opened the page and streamed back (a phone, another computer in the room); browsers require HTTPS for it (for example Cloudflare Tunnel).
+- **Speaker marking** (optional, off by default): voices are clustered, then the transcript-correction LLM decides which cluster is the physician, giving `醫師:` / `患者或家屬:` / `不明:`. The marks can be wrong; the prompts tell every agent to trust context over a mark.
+- **While recording**: you cannot switch or leave the patient / visit date or delete the session; everything else (talking to the Main Agent, editing the record) works. After a restart the old speaker marks are kept but the voice clusters start again.
+
+The transcript (with times and speaker marks) is appended after the "full interview record" in the prompts of the **Main Agent, record writer, hallucination reviewer, low-confidence annotator and note reviewer**; the interview assistant and the professors do **not** receive it. The source tags `[語音#N]`, `[語音#N-M]`, `[語音#N, #M]` point to transcript segment numbers. Examination findings (tongue, pulse, blood pressure …) can be dictated or typed; when the transcript has none, the record says "未知（未口述，待醫師輸入）" and never "not examined".
+Each record version stores how much audio had been recorded when it was made (`@錄音 mm:ss`), so the agents can tell whether a physician's edit came before or after a transcript line.
+
+Settings are in the Model Settings tab: speech recognition (model folders, device, microphone, window and overlap, vocabulary), the transcript-correction LLM (API URL, key, model; empty = no correction) and speaker marking (with advanced parameters). They can only be saved while no patient is loaded. The correction LLM is called once per recognised window, in parallel with the agents, so make sure your LLM server can handle several requests at once.
+
+**Without the speech models** the "Voice" button shows "no speech models downloaded" and the program does **not** preload anything at startup; everything else works normally. To add them later, run `install.cmd` again and choose the voice feature, or `.venv-asr\Scripts\python.exe tools\download_models.py --write-config`. With the models, the program preloads them onto the GPU at startup.
+
+Recordings and transcripts live in the patient folder (`patient_data/` is excluded by `.gitignore`); the models are in `models/` and the speech environment in `.venv-asr/`, also kept out of version control. A patient's voice is identifiable personal data: handle it according to your institution's rules.
+
 ## Configuration
 
-`config.json` contains shared settings for the Main Agent, subagents, and Professor ReAct/RAG. On first use, copy `config.example.json` to `config.json` and fill in your own endpoint/key. `config.json` is excluded by `.gitignore`. If configuration loading fails, the system prints a `WARNING` to the console and falls back to defaults; configuration saves use atomic writes.
+`config.json` contains shared settings for the Main Agent, subagents, and Professor ReAct/RAG. The voice feature's settings are in `voice_config` (speech recognition, the `corrector` transcript-correction LLM, speaker marking); the record-editing tag threshold is `note_edit.min_surviving_run` (default 3: how many characters in a row must survive a rewrite for a tag to stay). On first use, copy `config.example.json` to `config.json` and fill in your own endpoint/key. `config.json` is excluded by `.gitignore`. If configuration loading fails, the system prints a `WARNING` to the console and falls back to defaults; configuration saves use atomic writes.
 
 ```json
 {
@@ -516,7 +544,7 @@ Patient demographic data sent into LLM prompts is de-identified first: names kee
 
 ## Test Status
 
-The project currently has no standalone automated test directory. See `SPEC.md` for the recommended manual acceptance checklist.
+`tests/` holds pytest tests for the voice feature (alignment, transcript pipeline, speaker marking, remote microphone, replay, continued recordings), the record tag editing and the prompt format. They are for development only: run `install.cmd -Dev` (or `pip install -r requirements-dev.txt -c constraints.txt`), then `.venv\Scripts\python.exe -m pytest tests`; no GPU or models needed. See `SPEC.md` for the manual acceptance checklist of the rest.
 
 ## License
 

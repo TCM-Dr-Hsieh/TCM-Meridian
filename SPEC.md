@@ -1158,4 +1158,53 @@ professor_*/parent_map.jsonl
 - `detection_strength=0` 對照組模式可放行（不審查/不掃描），且在步驟結果與行為紀錄明確標示，可與「真正通過」區分。
 - 不合法的行級登載操作不會半套寫入病歷。
 - A&T 會遵守安全審核 prompt workflow：有安全性檢查教授時執行教授審查與標示；沒有時標註「未經過安全性檢查」並提醒醫師。
+- 語音功能（有模型）：開始／停止／續錄同一個 session 的 WAV；逐字稿編號接續；停止時先處理完已錄下的聲音；關閉視窗不停止錄音；錄音中不能切換／退出患者、刪除 session，其他操作照常；程式重啟後逐字稿可還原。
+- 語音功能（無模型）：按鈕提示「目前無下載語音模型」，啟動不預載，其他功能完全正常。
+- 修改模式：編輯框看不到來源標籤與低信心粗體標註；手打標籤被拒絕；改光標籤涵蓋的字會移除該標籤並在預覽列出；「放棄修改」不改病歷；病歷在編輯期間被更新時拒絕儲存。
 - 公開前敏感檔案已排除。
+
+## 17. 語音功能與修改病歷的標籤機制
+
+### 17.1 架構
+
+- 套件 `voice/`：`audio.py`（本機麥克風 → WAV 與 6 秒／重疊 3 秒的視窗佇列，佇列無上限，錄音不因處理慢而中斷）、`asr.py` + `asr_worker.py`（`.venv-asr` 子程序，Qwen3-ASR-1.7B + ForcedAligner-0.6B，JSON lines／base64 PCM）、`alignment.py`、`pipeline.py`（對齊 → OpenCC s2tw → 滾動 3 段 LLM 校稿 → 凍結快照）、`corrector.py`、`speaker/`（CAM++ ONNX 聲紋分群、角色判定、文字補標）、`remote.py`（遠端麥克風 WebSocket，編號封包／ACK／斷線續傳，token 與 Origin 檢查）、`replay.py`（回聽音檔切片，每個 session 隨機 token）、`service.py`（`VoiceManager` / `VoiceSession`）。
+- NiceGUI script mode 會在每個瀏覽器連線重跑整個主腳本，因此 `VoiceManager` 由 `voice.service.shared_manager()` 全程式共用一個，路由（回聽、遠端麥克風、靜態腳本）每個 app 只註冊一次。多個分頁共用同一個管理器；`sync_session` 不會卸載 session，只有開著語音視窗的頁面會讓管理器跟隨它所選的 session；沒有選患者的頁面仍可在錄音進行中開視窗並停止。
+- UI：`ui_app/controllers/voice_controller.py`（浮動視窗、按鈕狀態、遠端麥克風事件、說話者群對話框、逐字稿清單）、`voice_settings_controller.py`（模型設定頁的語音區塊與進階參數對話框）、`ui_app/voice_assets.py`（CSS 與 `tcmFloat` 浮動視窗 JS）。視窗建在分頁之外，切換頁面不會消失。
+
+### 17.2 session 與檔案
+
+一個 session 一個錄音：`log/<日期>-log/` 內 `<日期>-voice.wav`、`-voice-transcript.json/.txt`、`-voice-speaker.json`、`-voice-llm.jsonl`、`-voice-events.jsonl`。再按「開始錄製」以 append 接續（WAV 檔頭每秒修補一次，當機後仍可播放），逐字稿編號與時間軸接續。ASR 失敗的視窗留下「【音訊可能缺漏 mm:ss–mm:ss】」，不臆測內容。
+
+### 17.3 與其他功能的關係
+
+- `SessionBusyGuard(include_voice=True)` 在錄音進行中擋下切換／退出患者、切換日期、刪除 session、摘要並退出、修改患者資料；不擋 Agent 訊息與病歷編輯（`voice_busy()` 讀共用管理器）。
+- 每個主輪開始時取一份凍結的逐字稿快照（`VoiceManager.snapshot_text`），整輪沿用；問診結束後接續（`continue_after_interview`）取新的。逐字稿接在「完整問診對話紀錄」之後，注入 Main、Record、Hallucination、低信心標註、病歷檢查員；不注入問診助理與教授。
+- 版本快照帶 `rec_t`（錄音時鐘：這個 session 已錄下的音訊秒數，只增不減；`None` = 從未錄音）與 `rec_paused`；「病歷修改 diff 過程」的版本標示顯示 `@錄音 mm:ss`（無錄音的 session 完全不顯示，錄音前的版本標「尚未錄音」），讓 Agent 判斷修改與逐字稿的先後。
+- 智能體互動行為新增第 8 欄 `voice_subagent`，記錄錄音開始／停止、錯誤與校稿呼叫。
+
+### 17.4 來源標籤與 prompt
+
+- 新增來源標籤 `[語音#N]`、`[語音#N-M]`、`[語音#N, #M]`（N 為逐字稿行首編號；一個事實跨相鄰段落時標籤要涵蓋所有段落；標示「音訊可能缺漏」的段落不能當來源）。
+- 七大醫療狀態新增 (d)「檢查所見未口述」：舌、脈、血壓等可由醫師口述或手動輸入，逐字稿沒有不代表沒做；寫「未知（未口述，待醫師輸入）」（整個 session 沒有逐字稿時「未知（尚未輸入，待醫師輸入）」），不寫「尚未檢查」；只宣告要做而沒說結果時同樣寫未知。
+- 說話者標記（`醫師:`／`患者或家屬:`／`不明:`，` -> ` 同行換人，`*` 為文字推測）由程式自動判斷、可能整批判反：prompt 要求標記與語境矛盾時以語境為準；標題列沒有標記說明時依語境判斷誰在說話。
+- 「醫師修正與資訊衝突處理原則」取代舊的「醫師修改須與舊來源並列」：醫師的修正是目前的有效版本；被取代的舊來源不得再用來把修正後的內容判為幻覺／矛盾／遺漏／低信心；修正之後才取得的獨立資訊與之衝突時並列並標「待確認」；歷史重複注入不重啟衝突；此優先權不豁免單位、日期、否定詞等獨立問題。低信心標註另有弱提醒：醫師修正值與客觀來源（讀取的檔案、病歷系統）不同時標註一次，不否定醫師。
+- 病歷檢查員：有逐字稿時舌診、脈診不列入補問，改列 `update_reminder` 提醒醫師；沒有逐字稿時維持原規則（請實習醫師執行）。
+
+### 17.5 修改病歷：隱藏標籤（`record_edit_tags.py`）
+
+- 編輯框以 `editable_text` 顯示不含來源標籤（NOTE 另不含低信心 `**片段（原因）**`）的文字；儲存時 `merge_human_edit` 以 diff 還原：未改動的行原樣保留；改動的行中，標籤留在它涵蓋的字旁邊，涵蓋的字（只算文字與數字）連續留下的長度小於 `note_edit.min_surviving_run`（預設 3，1–20）時移除該標籤並在預覽與版本 `meta.removed_tags` 記錄；`[人類醫師_手動修改]` 不會被移除；低信心標註只有片段完全不變才還原，否則放棄並記在 `meta.dropped_marks`；每個新增或改動的非空行行尾補 `[人類醫師_手動修改]`（同行不重複）。
+- 標籤語彙：`問診紀錄_(患者|家屬|實習醫師|病歷系統)R\d+`、`人類醫師_(T\d+|手動修改)`、`上次病歷`、`歷史病歷`、`Forum_D\d+`、`語音#…`（範圍／列舉）、日期開頭的檔名標籤；其餘方括號文字視為一般文字。
+- 手打或貼上的標籤語法會被拒絕（`NoteEditError`）；編輯開始時記錄版本 id 與原文，儲存時病歷已被更新（另一視窗、作業、復原）則拒絕；「參考版本」浮動視窗唯讀顯示帶標籤的原文（標籤淡色、低信心標註粗體並附原因）；「放棄修改」不改病歷。預覽以計時器在停止輸入後重算。
+
+### 17.6 安裝與設定
+
+- `setup.ps1`：`.venv-asr`（`requirements-asr.txt`，torch 2.7.1+cu128，約 4 GB）一律建立；`-Voice`／`-NoVoice`（未指定時詢問，`-Yes` 預設安裝）決定是否下載語音模型（`tools/download_models.py`，固定 revision、可續傳，大小與 SHA-256 記在 `tools/model_manifest.json`）；選擇語音時檢查 NVIDIA 顯卡與驅動（≥ 570，`-SkipGpuCheck` 可略過）；磁碟需求 12 GB／20 GB。
+- 啟動時有模型才預載（`VoiceManager.schedule_preload`），沒有模型不預載；按鈕提示「目前無下載語音模型，無法啟動語音功能。」
+- `config.json`：`voice_config`（`asr`、`speaker`、`corrector`、`timeout_seconds`、`retries`；`corrector.model_name` 留空 = 不校稿）、`note_edit.min_surviving_run`。全域設定只能在沒有載入患者時儲存。
+
+### 17.7 已知限制
+
+- LLM 伺服器需能並行處理多個請求（校稿每個辨識視窗呼叫一次，與各 Agent 並行；程式不做排程限流）。
+- 多個瀏覽器分頁各有自己的頁面狀態但共用一個語音管理器；錄音進行中其他分頁不能離開該 session。
+- 說話者標記是自動判斷，可能局部錯誤甚至整批相反；遠端麥克風需要 HTTPS。
+- 低信心標註在「參考版本」才看得到原因，編輯框內不顯示；修改標註片段會使該標註被移除（下次低信心掃描可重新標註）。

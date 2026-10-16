@@ -89,7 +89,7 @@ def build_agent_behavior_tab(ui: Any, app_state: dict[str, Any]):
                 return
 
             grid_style = (
-                "display:grid;grid-template-columns:repeat(7,minmax(150px,1fr));"
+                f"display:grid;grid-template-columns:repeat({len(AGENT_COLUMNS)},minmax(150px,1fr));"
                 "gap:6px;align-items:stretch;width:100%;overflow-x:auto;"
             )
             with ui.element("div").style(grid_style):

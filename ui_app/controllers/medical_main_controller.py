@@ -95,6 +95,11 @@ def build_medical_main_tab(
     agent_run_state = get_agent_run_state(app_state, ui_state)
     interview_state = get_interview_state(app_state)
     busy_guard = get_session_busy_guard(app_state, ui_state)
+    voice_controller = app_state.get("_voice_controller")
+    if voice_controller is not None:
+        voice_controller.bind_button(refs["btn_voice"])
+    else:
+        refs["btn_voice"].disable()
     main_chat_input = MainChatInputController(app_state=app_state, btn_send=btn_send)
     app_state["_main_chat_input"] = main_chat_input
     quick_prompt_controller = QuickPromptController(
@@ -137,12 +142,15 @@ def build_medical_main_tab(
             "at_display": refs["at_display"],
             "note_editor": refs["note_editor"],
             "at_editor": refs["at_editor"],
+            "note_preview": refs["note_preview"],
+            "at_preview": refs["at_preview"],
             "version_label": refs["version_label"],
             "record_status": refs["record_status"],
             "btn_browse": refs["btn_browse"],
             "btn_diff": refs["btn_diff"],
             "btn_edit_mode": refs["btn_edit_mode"],
             "btn_edit_done": refs["btn_edit_done"],
+            "btn_edit_cancel": refs["btn_edit_cancel"],
             "btn_undo": refs["btn_undo"],
             "btn_redo": refs["btn_redo"],
         },
@@ -150,7 +158,9 @@ def build_medical_main_tab(
         record_snapshot_store=record_snapshot_store,
         write_session_log=write_session_log,
         busy_guard=busy_guard,
+        load_config=load_config,
     )
+    ui.timer(0.7, record_controller.refresh_preview)      # 修改框下方「儲存後將移除哪些來源標籤」的提示，停止輸入後才重算
 
     def _update_display():
         record_controller.update_display()
@@ -414,6 +424,7 @@ def build_medical_main_tab(
     btn_diff.on_click(record_controller.on_diff)
     btn_edit_mode.on_click(record_controller.on_edit_mode)
     btn_edit_done.on_click(record_controller.on_edit_done)
+    refs["btn_edit_cancel"].on_click(record_controller.on_edit_cancel)
     btn_undo.on_click(record_controller.on_undo)
     btn_redo.on_click(record_controller.on_redo)
 

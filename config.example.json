@@ -92,5 +92,41 @@
       "api_key": "KEY",
       "model_name": "deepseek/deepseek-v4-flash"
     }
+  },
+  "voice_config": {
+    "asr": {
+      "asr_model_dir": "models\\Qwen3-ASR-1.7B",
+      "aligner_model_dir": "models\\Qwen3-ForcedAligner-0.6B",
+      "device": "auto",
+      "window_seconds": 6.0,
+      "overlap_seconds": 3.0,
+      "context_chars": 1000,
+      "vocabulary": "",
+      "correction_vocabulary": "",
+      "microphone_id": "",
+      "python_path": ""
+    },
+    "speaker": {
+      "enabled": false,
+      "model_path": "models\\speaker\\3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx",
+      "use_in_jobs": true,
+      "text_fill": true,
+      "text_fill2": false,
+      "unknown_percentile": 15.0,
+      "advanced": {}
+    },
+    "corrector": {
+      "api_url": "https://openrouter.ai/api/v1",
+      "api_key": "KEY",
+      "model_name": "google/gemini-3-flash-preview",
+      "temperature": 0.2,
+      "max_tokens": 0,
+      "context_tokens": 125000
+    },
+    "timeout_seconds": 180.0,
+    "retries": 3
+  },
+  "note_edit": {
+    "min_surviving_run": 3
   }
 }

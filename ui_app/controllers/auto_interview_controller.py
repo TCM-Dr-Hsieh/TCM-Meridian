@@ -578,6 +578,10 @@ class AutoInterviewController:
         at_content = current["at"] if current else ""
         record_history_snapshots = [dict(snap) for snap in getattr(hist, "snapshots", [])] if hist else []
         record_history_current_index = getattr(hist, "current_index", -1) if hist else -1
+        # 問診期間錄音可能仍在進行：恢復時重新取一份最新的診間對話逐字稿（編號只會往後增加）。
+        voice_manager = self.app_state.get("_voice_manager")
+        voice_transcript = voice_manager.snapshot_text(fp, dt) if voice_manager is not None else None
+        rec_clock = (lambda: voice_manager.recording_position(fp, dt)) if voice_manager is not None else None
 
         def log_cb(msg):
             self.write_session_log(fp, dt, msg)
@@ -608,6 +612,8 @@ class AutoInterviewController:
                     record_history_current_index=record_history_current_index,
                     on_step=on_step,
                     log_callback=log_cb,
+                    voice_transcript=voice_transcript,
+                    rec_clock=rec_clock,
                 ),
             )
 

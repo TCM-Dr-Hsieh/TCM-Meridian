@@ -1,0 +1,69 @@
+TCM-Meridian
+Copyright 2026 Hong-Wen Hsieh
+
+This product includes software developed by Hong-Wen Hsieh and is licensed under the
+Apache License, Version 2.0 (see the LICENSE file).
+
+Derived work
+------------
+The voice feature (the voice/ package: microphone capture and WAV writing, audio windowing, the ASR worker
+subprocess, forced-alignment mapping, the rolling transcript correction logic and prompt, the speaker-marking
+service, the remote-microphone streaming protocol and browser capture script, the replay of the recording, and the
+source-tag editing logic of record_edit_tags.py) is derived from voice_to_text
+(https://github.com/TCM-Dr-Hsieh/voice_to_text) and from TCM-Meridian-mini, both Copyright 2026 Hong-Wen Hsieh and
+licensed under the Apache License, Version 2.0 (adapted and changed for this project).
+
+Third-party software and models (not included in this repository)
+------------------------------------------------------------------
+This repository does not contain third-party code or model weights. setup.ps1 installs
+dependencies from their own distributions (PyPI, PyTorch) and downloads models from
+Hugging Face; each remains under its own license, which you must comply with. The main
+components and the licenses declared in their package metadata at the time of writing:
+
+  NiceGUI                              MIT
+  openai (Python SDK)                  Apache-2.0
+  chromadb                             Apache-2.0
+  langchain / langchain-community      MIT
+  requests                             Apache-2.0
+  httpx                                BSD
+  SoundCard                            BSD
+  PyAV (av)                            BSD-3-Clause
+  NumPy                                BSD-3-Clause (and others, see its distribution)
+  opencc-python-reimplemented          Apache-2.0
+  PyTorch (torch)                      BSD
+  Hugging Face transformers            Apache-2.0
+  Hugging Face huggingface_hub         Apache-2.0
+  safetensors                          Apache-2.0
+  qwen-asr                             Apache-2.0
+  ONNX Runtime (onnxruntime)           MIT
+  kaldi-native-fbank                   Apache-2.0
+  protobuf                             BSD-3-Clause
+  flatbuffers                          Apache-2.0
+
+  Qwen/Qwen3-ASR-1.7B                  Apache-2.0 (model weights, downloaded at install time)
+  Qwen/Qwen3-ForcedAligner-0.6B        Apache-2.0 (model weights, downloaded at install time)
+  3D-Speaker CAM++ zh-en "advanced"    Model weights: published by the 3D-Speaker project (Tongyi Lab) on ModelScope as
+                                       iic/speech_campplus_sv_zh_en_16k-common_advanced; the license field of its
+                                       ModelScope page reads "Apache License 2.0" (checked 2026-10-09; the page names
+                                       no license file and does not name the training data, only "large-scale Chinese
+                                       and English speaker datasets").
+                                       The file the installer downloads is not one we found published by the authors: it is the
+                                       third-party ONNX conversion csukuangfj/speaker-embedding-models (pinned commit,
+                                       SHA-256 in tools/model_manifest.json), downloaded at install time; this project
+                                       does not redistribute it. That repository carries no license statement; the
+                                       file's own metadata names the model above as its source.
+                                       Apache-2.0 permits converting the weights to another format. Whoever
+                                       redistributes the converted file must include the license text and the
+                                       original notices, which the conversion repository does not do. This is a
+                                       statement of facts, not legal advice: if you must redistribute the model or
+                                       have compliance requirements, confirm them yourself.
+                                       Other speaker models were measured on two recordings and not adopted.
+
+The full list of installed packages is pinned in constraints.txt (main environment) and
+requirements-asr.txt (speech-recognition environment, installed with the voice feature). Review the license of each package
+before redistributing a bundled copy of an installed environment.
+
+Clinical use notice
+-------------------
+This software is a documentation and decision-support aid. It is not a medical device and does
+not replace the judgment of a qualified physician.

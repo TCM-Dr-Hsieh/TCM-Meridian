@@ -4,6 +4,7 @@ from typing import Any, Callable
 
 from main_agent_preferences import resolve_physician_preferences
 from ui_app.controllers.session_busy_guard import get_session_busy_guard
+from ui_app.controllers.voice_settings_controller import VoiceSettingsForm
 
 
 def build_model_settings_tab(
@@ -19,7 +20,7 @@ def build_model_settings_tab(
 
     with ui.column().classes("w-full").style("max-width: 800px; margin: 0 auto;"):
         ui.label("⚙️ 模型設定").classes("section-title")
-        ui.label("設定 AI 主治醫師、病歷登載助理、幻覺審查員、問診助理、低信心標註、病歷檢查員的 API 連線與模型參數。").style(
+        ui.label("設定 AI 主治醫師、病歷登載助理、幻覺審查員、問診助理、低信心標註、病歷檢查員的 API 連線與模型參數，以及語音功能（語音辨識、逐字稿校稿、說話者標記）。").style(
             "color: #666; font-size: 14px; margin-bottom: 16px;"
         )
 
@@ -172,6 +173,24 @@ def build_model_settings_tab(
             note="若 Model Name 留空，則 Main Agent 無法執行病歷完整性掃描。",
         )
 
+        voice_form = VoiceSettingsForm(ui, cfg, app_state.get("_voice_manager"))
+
+        with ui.card().classes("w-full q-pa-md q-mb-lg").style("border: 1px solid var(--border); border-radius: 12px;"):
+            ui.label("✏️ 修改病歷（來源標籤）").style("font-weight: 700; font-size: 16px; color: var(--primary-dark);")
+            ui.label(
+                "修改模式的編輯框不顯示來源標籤；儲存時，標籤所涵蓋的字被改光了就移除該標籤。"
+                "「標籤保留門檻」是改寫後仍留著的連續字數（只算文字與數字，標點不算）要達到幾個字，標籤才算保留；"
+                "越大越容易移除標籤，越小越容易保留。"
+            ).style("color: #999; font-size: 12px; margin-bottom: 8px;")
+            min_run_input = ui.number(
+                label="標籤保留門檻（連續字數）",
+                value=(cfg.get("note_edit") or {}).get("min_surviving_run", 3),
+                min=1,
+                max=20,
+                step=1,
+                precision=0,
+            ).classes("w-full")
+
         with ui.row().classes("w-full gap-3"):
             btn_save_cfg = ui.button("💾 儲存設定", color="green").style("font-size: 15px;")
             cfg_status = ui.label("").style("font-size: 14px; line-height: 36px;")
@@ -271,8 +290,27 @@ def build_model_settings_tab(
                 lc_control_group = lc_strength == 0
             new_cfg["lc_subagent"] = lc_cfg
             new_cfg["nr_subagent"] = read_agent_section(nr_inputs, {"max_tokens": 20000, "temperature": 1.0})
+            try:
+                min_run = int(min_run_input.value)
+            except (TypeError, ValueError):
+                min_run = 0
+            if not 1 <= min_run <= 20:
+                cfg_status.text = "❌ 標籤保留門檻必須是 1～20 的整數"
+                cfg_status.style("color: var(--danger);")
+                return
+            new_cfg["note_edit"] = {"min_surviving_run": min_run}
+            try:
+                new_cfg["voice_config"] = voice_form.read()
+            except ValueError as exc:
+                cfg_status.text = f"❌ 語音設定有誤：{exc}"
+                cfg_status.style("color: var(--danger);")
+                return
             save_config(new_cfg)
             reset_agent_state()
+            voice_manager = app_state.get("_voice_manager")
+            if voice_manager is not None:
+                voice_manager.schedule_preload()
+            voice_form.refresh_models_state()
             control_groups = []
             if hallucination_control_group:
                 control_groups.append("幻覺審查")

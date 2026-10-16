@@ -169,14 +169,14 @@ def build_patient_registration_tab(
             state["mode"] = "idle"
 
     def on_new():
-        if busy_guard.reject_if_busy(status_label=form_status):
+        if busy_guard.reject_if_busy(status_label=form_status, include_voice=True):
             return
         state["selected_folder_path"] = None
         patient_table.selected = []
         enter_mode("create")
 
     def on_edit():
-        if busy_guard.reject_if_busy(status_label=form_status):
+        if busy_guard.reject_if_busy(status_label=form_status, include_voice=True):
             return
         if not state["selected_folder_path"]:
             form_status.text = "⚠️ 請先從左側列表選擇一位患者"
@@ -184,7 +184,7 @@ def build_patient_registration_tab(
         enter_mode("edit")
 
     def on_delete():
-        if busy_guard.reject_if_busy(status_label=form_status):
+        if busy_guard.reject_if_busy(status_label=form_status, include_voice=True):
             return
         selected = patient_table.selected
         if not selected:
@@ -199,7 +199,7 @@ def build_patient_registration_tab(
                 ui.button("取消", color="grey", on_click=dlg.close).props("flat")
 
                 def do_del():
-                    if busy_guard.reject_if_busy(status_label=form_status):
+                    if busy_guard.reject_if_busy(status_label=form_status, include_voice=True):
                         dlg.close()
                         return
                     msg = delete_patient(folder_path)
@@ -221,7 +221,7 @@ def build_patient_registration_tab(
         dlg.open()
 
     def on_save():
-        if busy_guard.reject_if_busy(status_label=form_status):
+        if busy_guard.reject_if_busy(status_label=form_status, include_voice=True):
             return
         if state["mode"] == "create":
             result = create_patient(

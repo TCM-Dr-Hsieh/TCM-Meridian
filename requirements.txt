@@ -20,3 +20,10 @@ langchain-community==0.3.27      # LangChain 社群整合（只用 Chroma）
 # ============== 文字處理與檢索 ==============
 numpy==1.26.4                    # 數值計算
 requests==2.32.4                 # HTTP 請求（Embedding endpoint）
+
+# ============== 語音功能（UI 環境這一側；語音辨識本體在獨立的 .venv-asr，見 requirements-asr.txt）==============
+SoundCard>=0.4.3,<0.5            # 本機麥克風錄音
+av>=14,<17                       # 遠端麥克風的重取樣、開發用音檔重播
+opencc-python-reimplemented>=0.1.7,<1   # 語音辨識簡體原稿轉繁體
+onnxruntime>=1.26,<2             # 說話者標記的聲紋模型（CPU）
+kaldi-native-fbank>=1.22,<2      # 聲紋模型的 fbank 前處理

@@ -200,7 +200,7 @@ class PatientSessionLifecycleController:
     def _reject_if_busy(self) -> bool:
         """忙碌中禁止切換、刪除或寫入 session-sensitive 狀態。回傳 True 表示已拒絕。"""
         if self.busy_guard:
-            return self.busy_guard.reject_if_busy(status_label=self.refs["session_status"])
+            return self.busy_guard.reject_if_busy(status_label=self.refs["session_status"], include_voice=True)
         return False
 
     @staticmethod
@@ -562,7 +562,7 @@ class PatientSessionLifecycleController:
         finally:
             if self.busy_guard:
                 self.busy_guard.end_transition()
-            if btn_confirm_new and not (self.busy_guard and self.busy_guard.is_busy()):
+            if btn_confirm_new and not (self.busy_guard and self.busy_guard.is_busy(include_voice=True)):
                 btn_confirm_new.enable()
 
     def on_delete_session(self):

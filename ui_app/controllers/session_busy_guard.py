@@ -44,10 +44,16 @@ class SessionBusyGuard:
         if main_chat_input:
             main_chat_input.unlock("session_transition")
 
-    def is_busy(self, *, block_edit: bool = True) -> bool:
-        return self.reason(block_edit=block_edit) is not None
+    def is_busy(self, *, block_edit: bool = True, include_voice: bool = False) -> bool:
+        return self.reason(block_edit=block_edit, include_voice=include_voice) is not None
 
-    def reason(self, *, block_edit: bool = True) -> str | None:
+    def voice_busy(self) -> bool:
+        """A voice recording is running, starting or stopping. It belongs to the loaded session, so that session cannot be left
+        (`include_voice`); it does not stop the agent, the record editing or anything else the physician does meanwhile."""
+        manager = self.app_state.get("_voice_manager")
+        return bool(manager is not None and manager.busy)
+
+    def reason(self, *, block_edit: bool = True, include_voice: bool = False) -> str | None:
         if self.app_state.get("_session_transition_active"):
             return "session_transition"
         if block_edit and self.ui_state and self.ui_state.get("view_mode") == "edit":
@@ -56,6 +62,8 @@ class SessionBusyGuard:
             return "agent_running"
         if self.app_state.get("interview_active"):
             return "interview_active"
+        if include_voice and self.voice_busy():
+            return "voice_recording"
         return None
 
     def message(self, reason: str | None = None) -> str:
@@ -63,11 +71,13 @@ class SessionBusyGuard:
         if reason == "session_transition":
             return "⚠️ session 切換或儲存流程進行中，請稍候"
         if reason == "edit_mode":
-            return "⚠️ 編輯模式中，請先按「修改完成」或切回瀏覽模式"
+            return "⚠️ 編輯模式中，請先按「修改完成」或「放棄修改」"
         if reason == "agent_running":
             return "⚠️ AI 執行中，請先中斷或等待完成"
         if reason == "interview_active":
             return "⚠️ 問診中，請先完成或中斷問診"
+        if reason == "voice_recording":
+            return "⚠️ 語音錄音進行中，請先到「語音功能」視窗按「停止錄製」"
         return "⚠️ 目前狀態不允許執行此操作"
 
     def reject_if_busy(
@@ -75,8 +85,9 @@ class SessionBusyGuard:
         *,
         status_label: Any | None = None,
         block_edit: bool = True,
+        include_voice: bool = False,
     ) -> bool:
-        reason = self.reason(block_edit=block_edit)
+        reason = self.reason(block_edit=block_edit, include_voice=include_voice)
         if reason is None:
             return False
         msg = self.message(reason)
@@ -91,7 +102,7 @@ class SessionBusyGuard:
         return True
 
     def sync_navigation(self):
-        disabled = self.is_busy(block_edit=True)
+        disabled = self.is_busy(block_edit=True, include_voice=True)
         for control in self._navigation_controls:
             try:
                 if disabled:

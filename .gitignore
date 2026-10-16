@@ -16,7 +16,14 @@ patient_data/*
 *.py[cod]
 *.egg-info/
 .venv/
+.venv-asr/
 venv/
+.pytest_cache/
+.pytest_tmp/
+
+# ── 語音功能：模型（數 GB，由 setup.ps1 / tools/download_models.py 下載）與語音辨識程序的記錄 ──
+models/
+data/
 
 # ── 一鍵安裝記錄（setup.ps1 的 transcript，可能含本機路徑）──
 setup.log

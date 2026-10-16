@@ -138,6 +138,7 @@ class LowConfidenceSubagent:
         self,
         note_content: str,
         interview_dialogue: str = "",
+        voice_transcript: str = "",
         conversation_history: str = "",
         last_visit_block: str = "",
         history_summary: str = "",
@@ -153,6 +154,7 @@ class LowConfidenceSubagent:
         Args:
             note_content: 當前 NOTE 內容
             interview_dialogue: 完整問診對話紀錄
+            voice_transcript: 診間對話逐字稿（語音辨識所得；接在完整問診對話紀錄之後）
             conversation_history: 人類醫師與 AI 主治醫師的互動過程
             last_visit_block: 上次就診病歷
             history_summary: 歷史病歷摘要
@@ -247,6 +249,7 @@ class LowConfidenceSubagent:
             check_result = self._scan_round(
                 current_note=current_note,
                 interview_dialogue=interview_dialogue,
+                voice_transcript=voice_transcript,
                 conversation_history=conversation_history,
                 system_prompt=system_prompt,
                 round_num=lc_round,
@@ -396,6 +399,7 @@ class LowConfidenceSubagent:
         loaded_files_block: str = "",
         behavior_context: dict | None = None,
         log_callback: Optional[Callable[[str], None]] = None,
+        voice_transcript: str = "",
     ) -> dict[str, Any]:
         """
         執行一輪 LC 掃描。
@@ -420,6 +424,9 @@ class LowConfidenceSubagent:
 
 ## 【完整問診對話紀錄】
 {interview_dialogue}
+
+## 【診間對話逐字稿】
+{voice_transcript if voice_transcript else '（空白）'}
 """
 
         user_prompt += f"""

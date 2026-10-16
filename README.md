@@ -31,6 +31,8 @@ TCM-Meridian，中文名「杏林經緯」，是一套以 NiceGUI 建立的中�
 ## 功能特色
 
 - **看診工作流**：檔案式患者與就診 Session 管理、三欄式工作台、病歷瀏覽/編輯與 Snapshot 版本控制（undo / redo / diff）。版本歷史會持久化到 session log 資料夾，同一就診日期退出再載入仍接續 diff/undo/redo，被覆蓋的版本與外部改檔狀態另存稽核。人工修改自動標記 `[人類醫師_手動修改]`（同行不重複疊加），就診日期附 50 字 NOTE 摘要索引。
+- **語音輸入**：左欄「語音功能」開啟可拖動的浮動視窗，在背景錄下診間對話並即時辨識（Qwen3-ASR + ForcedAligner，GPU）、經 LLM 校稿成逐字稿，可選說話者標記（醫師／患者或家屬／不明）；逐字稿接在「完整問診對話紀錄」之後交給主 Agent、病歷登載、幻覺審查、低信心標註與病歷檢查員，來源標籤為 `[語音#N]`。支援本機麥克風與「此瀏覽器麥克風」（遠端／手機，需 HTTPS）、點段落時間回聽。一個 session 一個錄音檔，可停止後續錄。沒有安裝語音模型時此功能不可用，其他功能完全不受影響。詳見下方「語音功能」。
+- **修改病歷時隱藏來源標籤**：修改模式的編輯框不顯示 `[問診紀錄_…]`、`[語音#N]` 等來源標籤與低信心粗體標註，儲存時由程式還原；標籤涵蓋的字被改光就移除該標籤，另開「參考版本」視窗對照原文。
 - **常用提示詞**：主介面右欄可建立、修改、刪除及匯入全域常用提示詞；匯入只會填入訊息草稿，不會自動送出或啟動 Main Agent。
 - **多智能體協作**：ReAct 主 Agent 以嚴格 JSON 契約協調病歷登載、幻覺審查、低信心標註、病歷檢查員、問診助理等 Subagent，並可諮詢教授 ReAct/RAG subagent（教授自行提出檢索 query → 前綴分類 → 檢索 → RRF → rerank → 回答）、讀取患者影像與文字檔；全程記錄於「智能體互動行為」時間線。病歷的版本演化會以純文字「病歷修改 diff 過程」注入主 Agent 與相關 Subagent 的 prompt，讓它們看得到每一版由誰、在哪一步造成的改動。
 - **安全設計**：fail-closed 幻覺審查（未通過或服務異常即不寫入、不假成功）、fail-closed 教授諮詢（教授回傳錯誤即不寫入討論區，錯誤訊息不會被當成教授意見）、行級登載整批驗證（全有全無）、來源歸因、合作式中斷（含教授 ReAct 迴圈、檢索與 rerank）、忙碌與全域設定鎖；另支援研究對照組模式（幻覺／低信心檢測強度設 `0` 即不檢查，教授 `max_retrievals_per_answer` 設 `0` 即不查庫）。
@@ -94,16 +96,22 @@ Storage Layer
 ├── agent_behavior_log.py
 ├── deidentification_utils.py
 ├── multimodal_utils.py
-├── record_edit_tags.py
+├── record_edit_tags.py        # 來源標籤的隱藏／還原／移除（修改病歷用）
 ├── record_diff_context.py
 ├── prompt_*.txt
 ├── Record_Template.txt
 ├── config.json
 ├── requirements.txt
+├── requirements-asr.txt       # 語音辨識環境（.venv-asr，含 CUDA 版 PyTorch）
+├── requirements-dev.txt       # 開發用（pytest）
 ├── constraints.txt            # 已測試的套件固定版本（install 用）
+├── NOTICE                     # 第三方套件與模型的授權說明
 ├── install.cmd / setup.ps1    # 一鍵安裝（Windows）
 ├── start.cmd / start.ps1      # 一鍵啟動（Windows）
-├── tools/doctor.py            # 環境健檢
+├── tools/doctor.py            # 環境健檢（含語音環境與模型）
+├── tools/download_models.py   # 下載語音模型（固定版本、可續傳）
+├── voice/                     # 語音功能：錄音、ASR、逐字稿、說話者標記、遠端麥克風、回聽
+├── tests/                     # pytest（語音與病歷編輯；只用於開發）
 ├── SPEC.md
 ├── ui_app/
 │   ├── context.py
@@ -129,7 +137,8 @@ Storage Layer
 - 主 Agent 與 Subagent 需要 OpenAI-compatible chat API。
 - 教授 ReAct/RAG 需要 OpenAI-compatible embedding endpoint。
 - 可搭配 LM Studio、OpenRouter 或其他相容服務。
-- 不需要 GPU，也不下載任何模型：所有 LLM 與 embedding 都走 API。
+- 主要功能不需要 GPU，也不下載任何模型：所有 LLM 與 embedding 都走 API。
+- 只有**語音功能**的語音辨識在本機執行，需要 NVIDIA 顯卡（驅動 570 以上）與約 6.1 GB 的語音模型；不安裝語音模型也能使用其他全部功能。
 
 手動安裝依賴（一鍵安裝已涵蓋，見下節）：
 
@@ -153,13 +162,13 @@ pip install -r requirements.txt -c constraints.txt
 
 **不需要預先安裝 conda 或任何 Python 環境。**
 
-1. 雙擊 `install.cmd`（或在 PowerShell 執行 `.\setup.ps1`）。它會依序：預檢（系統、磁碟、網路）→ 找 Python 3.12（找不到時**經你同意**用 winget 安裝，只裝給目前使用者）→ 在專案內建立 `.venv` 並依 `constraints.txt` 安裝已測試版本的套件 → 沒有 `config.json` 時由 `config.example.json` 複製（**已存在的絕不覆蓋**）→ 健檢（`tools\doctor.py`）。可重複執行，已完成的步驟會略過；記錄寫在 `setup.log`。
+1. 雙擊 `install.cmd`（或在 PowerShell 執行 `.\setup.ps1`）。它會依序：預檢（系統、磁碟、網路）→ 找 Python 3.12（找不到時**經你同意**用 winget 安裝，只裝給目前使用者）→ 在專案內建立 `.venv` 並依 `constraints.txt` 安裝已測試版本的套件 → 建立獨立的語音辨識環境 `.venv-asr`（含 CUDA 版 PyTorch，下載約 4 GB；不論是否安裝語音功能都會建立）→ 沒有 `config.json` 時由 `config.example.json` 複製（**已存在的絕不覆蓋**）→ 下載語音模型（約 6.1 GB，**只有選擇安裝語音功能時**）→ 健檢（`tools\doctor.py`）。安裝開始時會詢問是否安裝語音功能；加 `-Yes` 不詢問、預設安裝；`-Voice` / `-NoVoice` 直接指定。選擇安裝語音功能但電腦沒有 NVIDIA 顯卡（或驅動太舊）時會停下並說明，可改加 `-NoVoice`，或加 `-SkipGpuCheck` 強行安裝（語音辨識在 CPU 上會非常慢）。磁碟空間約需 12 GB（只裝環境）／20 GB（含語音模型）。可重複執行，已完成的步驟會略過；記錄寫在 `setup.log`。
 2. 雙擊 `start.cmd`（或 `.\start.ps1`）啟動，瀏覽器會自動開啟 `http://localhost:8080`。
 3. 到「模型設定」分頁填入各 Agent 的 API 網址、金鑰與模型名稱；教授要用知識庫時，到「教授設定」分頁設好 embedding 模型後按「建立資料庫」。安裝腳本**不會**設定任何 LLM，也不會建立向量索引。
 
 其他：
 
-- 若直接執行 `.\setup.ps1` 被「執行原則」擋住，改用 `powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1`（`install.cmd` 已經這樣做）。可加 `-Force` 重建 `.venv`、`-SkipDoctor` 略過健檢。
+- 若直接執行 `.\setup.ps1` 被「執行原則」擋住，改用 `powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1`（`install.cmd` 已經這樣做）。可加 `-Force` 重建 `.venv` 與 `.venv-asr`、`-SkipDoctor` 略過健檢、`-ModelsDir` 指定語音模型資料夾、`-HfEndpoint` 指定 Hugging Face 鏡像、`-Dev` 另裝 pytest。
 - 專案路徑請盡量短，避免 Windows 260 字元路徑上限（腳本偵測到過長路徑且未啟用長路徑支援時會提醒）。
 - 隨時可重新健檢：`.venv\Scripts\python.exe tools\doctor.py`（只檢查環境、檔案與設定，不會連線測試任何模型，也不會印出金鑰）。
 - 一鍵啟動預設**不使用** NiceGUI 的自動重載（開發用功能）。要在開發時使用自動重載，直接執行 `python TCM_Meridian_main.py` 即可。
@@ -203,9 +212,28 @@ pip install -r requirements.txt -c constraints.txt
 - [教學影片 6](https://youtu.be/RmMTa5AmJC4)
 - [教學影片 7](https://youtu.be/NOhvOksdKeI)
 
+## 語音功能
+
+左欄「語音功能」按鈕開啟浮動視窗（可拖動、可縮放；關閉視窗**不會**停止錄音；其他頁面與操作照常使用）：
+
+- **開始錄製／停止錄製**：一個 session 對應一個錄音檔（`log/<日期>-log/<日期>-voice.wav`）；停止後再按「開始錄製」會接續錄在同一個檔案，逐字稿編號也會接下去。停止時會先把已錄下的聲音辨識完再結束。
+- **逐字稿清單**：每段顯示 `#編號 mm:ss` 與辨識文字；點編號會開啟回聽視窗，從該段起播放。最新兩段可能仍在校稿中（仍是有效來源）。
+- **麥克風**：「本機麥克風」使用執行程式的那台電腦；「此瀏覽器麥克風」由開啟頁面的瀏覽器錄音並串流回來（手機、診間另一台電腦），瀏覽器要求 HTTPS（例如 Cloudflare Tunnel）。
+- **說話者標記**（可選，預設關閉）：用聲紋分群，再請「逐字稿校稿」LLM 判斷哪一群是醫師，標成 `醫師:`／`患者或家屬:`／`不明:`；標記可能有誤，prompt 已要求各 Agent 以語境為準。
+- **錄音期間**：不能切換或退出患者／就診日期、不能刪除 session，其他操作（與 AI 主治醫師對話、改病歷）照常；程式重新啟動後，舊的說話者標記會保留，但聲紋分群重新開始。
+
+逐字稿（含時間與說話者標記）會附在 **主 Agent、病歷登載、幻覺審查、低信心標註、病歷檢查員** 的 prompt 中「完整問診對話紀錄」之後；問診助理與教授**不會**收到。來源標籤 `[語音#N]`、`[語音#N-M]`、`[語音#N, #M]` 指向逐字稿的段落編號。檢查所見（舌診、脈診、血壓等）可由醫師口述或手動輸入，逐字稿沒有時病歷寫「未知（未口述，待醫師輸入）」，不會寫成「尚未檢查」。
+病歷修改的版本會記錄當時已錄下的音訊長度（`@錄音 mm:ss`），讓各 Agent 判斷醫師的修改與逐字稿孰先孰後。
+
+設定在「模型設定」分頁：語音辨識（模型資料夾、運算裝置、麥克風、音訊視窗與重疊、專有詞）、逐字稿校稿 LLM（API 網址、金鑰、模型；留空＝不校稿）、說話者標記（含進階參數）。只能在沒有載入患者時儲存。校稿 LLM 每個辨識視窗呼叫一次，與各 Agent 並行，請確認 LLM 伺服器可同時處理多個請求。
+
+**沒有安裝語音模型時**：「語音功能」按鈕會顯示「目前無下載語音模型」，程式啟動時也**不會**預載模型，其他功能完全正常。補裝：重新執行 `install.cmd` 並選擇安裝語音功能，或 `.venv-asr\Scripts\python.exe tools\download_models.py --write-config`。有模型時，程式啟動會把語音模型預載到顯示卡。
+
+錄音檔與逐字稿都存在患者資料夾（`patient_data/` 已被 `.gitignore` 排除）；模型存在 `models/`、語音辨識環境在 `.venv-asr/`，同樣不進版控。患者的聲音是可識別的個資，請依你所在機構的規範保管。
+
 ## 設定檔
 
-`config.json` 包含主 Agent、各 Subagent 與教授 ReAct/RAG 共用設定。首次使用請**複製 repo 內的 `config.example.json` 為 `config.json`** 再填入自己的 endpoint/key（`config.json` 已被 `.gitignore` 排除，不會進版控）。以下是結構範例與預設值示意；實際工作區的 `config.json` 可能已改成 OpenRouter、LM Studio 或其他 endpoint。設定檔讀取失敗時系統會在主控台印出 `WARNING` 並回落預設設定；儲存設定時使用原子寫入。
+`config.json` 包含主 Agent、各 Subagent 與教授 ReAct/RAG 共用設定。首次使用請**複製 repo 內的 `config.example.json` 為 `config.json`** 再填入自己的 endpoint/key（`config.json` 已被 `.gitignore` 排除，不會進版控）。以下是結構範例與預設值示意；實際工作區的 `config.json` 可能已改成 OpenRouter、LM Studio 或其他 endpoint。語音功能的設定在 `voice_config`（語音辨識、`corrector` 逐字稿校稿 LLM、說話者標記），修改病歷的標籤保留門檻在 `note_edit.min_surviving_run`（預設 3；改寫後連續留下幾個字才算保留標籤）。設定檔讀取失敗時系統會在主控台印出 `WARNING` 並回落預設設定；儲存設定時使用原子寫入。
 
 ```json
 {
@@ -521,7 +549,7 @@ professor_*/parent_map.jsonl
 
 ## 測試狀態
 
-目前專案沒有獨立自動化測試目錄。建議的手動驗收清單請見 `SPEC.md`。
+`tests/` 有語音功能（對齊、逐字稿管線、說話者標記、遠端麥克風、回聽、續錄）與病歷標籤編輯、prompt 格式的 pytest，只用於開發：`install.cmd -Dev`（或 `pip install -r requirements-dev.txt -c constraints.txt`）後執行 `.venv\Scripts\python.exe -m pytest tests`，不需要 GPU 或模型。其餘功能的手動驗收清單請見 `SPEC.md`。
 
 ## 授權
 

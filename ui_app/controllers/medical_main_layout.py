@@ -125,6 +125,12 @@ def build_medical_main_layout(ui: Any, today: str) -> dict[str, Any]:
                 .props("dense outline")
                 .classes("w-full q-mt-xs")
             )
+            refs["btn_voice"] = (
+                ui.button("🎙 語音功能", color="blue-grey")
+                .props("dense outline no-caps")
+                .classes("w-full q-mt-xs")
+                .tooltip("開啟語音功能視窗：錄音並即時辨識診間對話（可拖動；關閉視窗不會停止錄音）")
+            )
 
             with ui.column().classes("w-full q-mt-sm") as new_session_panel:
                 refs["new_session_date"] = ui.input(label="日期 (YYYY-MM-DD)", value=today).classes("w-full")
@@ -158,10 +164,12 @@ def build_medical_main_layout(ui: Any, today: str) -> dict[str, Any]:
                 refs["btn_diff"] = ui.button("🔍 差異瀏覽", color="blue").props("dense")
                 refs["btn_edit_mode"] = ui.button("✏️ 修改模式", color="orange").props("dense")
                 refs["btn_edit_done"] = ui.button("✅ 修改完成", color="green").props("dense")
+                refs["btn_edit_cancel"] = ui.button("↩️ 放棄修改", color="grey").props("dense outline")
                 refs["btn_undo"] = ui.button("⬅️ 上一步", color="grey").props("dense")
                 refs["btn_redo"] = ui.button("➡️ 下一步", color="grey").props("dense")
 
             refs["btn_edit_done"].disable()
+            refs["btn_edit_cancel"].disable()
             refs["version_label"] = ui.label("").style("font-size: 12px; color: #888; margin-bottom: 4px;")
 
             ui.separator().style("margin: 8px 0;")
@@ -187,6 +195,8 @@ def build_medical_main_layout(ui: Any, today: str) -> dict[str, Any]:
                 refs["note_editor"] = ui.textarea(label="", placeholder="在此輸入 NOTE...").classes("w-full").style(
                     "min-height: 200px; font-family: monospace; font-size: 14px;"
                 )
+                # 修改框不顯示來源標籤與低信心標註（儲存時由程式還原；對照請看「參考版本」視窗）；這一行說明儲存後會移除哪些標籤
+                refs["note_preview"] = ui.label("").classes("edit-preview")
 
                 ui.separator().style("margin: 8px 0;")
 
@@ -194,6 +204,7 @@ def build_medical_main_layout(ui: Any, today: str) -> dict[str, Any]:
                 refs["at_editor"] = ui.textarea(label="", placeholder="在此輸入 A&T...").classes("w-full").style(
                     "min-height: 140px; font-family: monospace; font-size: 14px;"
                 )
+                refs["at_preview"] = ui.label("").classes("edit-preview")
             refs["edit_container"] = edit_container
             edit_container.set_visibility(False)
 

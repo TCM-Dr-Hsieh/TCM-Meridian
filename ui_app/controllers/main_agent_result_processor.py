@@ -78,11 +78,14 @@ class MainAgentResultProcessor:
                 snapshot.get("source", f"Agent Turn {result.get('turn_number', '?')} update_record"),
                 fp,
                 dt,
+                rec_t=snapshot.get("rec_t"),
+                rec_paused=bool(snapshot.get("rec_paused")),
             ):
                 pushed += 1
 
         final_source = f"Agent Turn {result.get('turn_number', '?')}"
-        if self._push_record_snapshot(result["note"], result["at"], final_source, fp, dt):
+        rec_t, rec_paused = self._recording_position(fp, dt)
+        if self._push_record_snapshot(result["note"], result["at"], final_source, fp, dt, rec_t=rec_t, rec_paused=rec_paused):
             pushed += 1
 
         if pushed:
@@ -91,12 +94,26 @@ class MainAgentResultProcessor:
             self.update_buttons()
             self.write_session_log(fp, dt, f"[AGENT_UPDATE] Agent 更新病歷 (版本 {self.history.current_index + 1}，新增 {pushed} 個快照)")
 
-    def _push_record_snapshot(self, note: str, at: str, source: str, fp: str, dt: str) -> bool:
+    def _recording_position(self, fp: str, dt: str) -> tuple[float | None, bool]:
+        manager = self.app_state.get("_voice_manager")
+        return manager.recording_position(fp, dt) if manager is not None else (None, False)
+
+    def _push_record_snapshot(
+        self,
+        note: str,
+        at: str,
+        source: str,
+        fp: str,
+        dt: str,
+        *,
+        rec_t: float | None = None,
+        rec_paused: bool = False,
+    ) -> bool:
         current = self.history.get_current()
         if current and current.get("note", "") == note and current.get("at", "") == at:
             return False
         before_index = self.history.current_index
-        truncated = self.history.push(note, at, source=source)
+        truncated = self.history.push(note, at, source=source, rec_t=rec_t, rec_paused=rec_paused)
         if truncated:
             self.record_snapshot_store.append_audit_event(
                 fp,

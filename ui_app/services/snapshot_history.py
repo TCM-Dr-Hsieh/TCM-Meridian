@@ -11,16 +11,35 @@ class SnapshotHistory:
         self.snapshots: list[dict] = []
         self.current_index: int = -1
 
-    def push(self, note: str, at: str, source: str = "init") -> list[dict]:
+    def push(
+        self,
+        note: str,
+        at: str,
+        source: str = "init",
+        *,
+        rec_t: float | None = None,
+        rec_paused: bool = False,
+        meta: dict | None = None,
+    ) -> list[dict]:
+        """Add a version. `rec_t` is the recording clock (seconds recorded so far in this session) when the version was made:
+        it orders the version against the voice transcript. None = this session had no recording yet.
+        `meta`: what a physician edit took away (`removed_tags`, `dropped_marks`), kept with the version for the audit and the diff."""
         truncated = self.snapshots[self.current_index + 1 :]
         self.snapshots = self.snapshots[: self.current_index + 1]
-        self.snapshots.append({
+        snapshot = {
             "id": str(uuid4()),
             "note": note,
             "at": at,
             "source": source,
             "timestamp": datetime.now().isoformat(),
-        })
+        }
+        if rec_t is not None:
+            snapshot["rec_t"] = round(float(rec_t), 2)
+            if rec_paused:
+                snapshot["rec_paused"] = True
+        if meta:
+            snapshot["meta"] = meta
+        self.snapshots.append(snapshot)
         self.current_index = len(self.snapshots) - 1
         return truncated
 

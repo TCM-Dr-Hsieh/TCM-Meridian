@@ -87,6 +87,7 @@ class NoteReviewSubagent:
         self,
         note_content: str,
         interview_dialogue: str = "",
+        voice_transcript: str = "",
         conversation_history: str = "",
         record_diff_context: str = "",
         loaded_files_block: str = "",
@@ -99,6 +100,7 @@ class NoteReviewSubagent:
         Args:
             note_content: 當前 NOTE 內容
             interview_dialogue: 完整問診對話紀錄
+            voice_transcript: 診間對話逐字稿（語音辨識所得；接在完整問診對話紀錄之後）
             conversation_history: 人類醫師與 AI 主治醫師的互動過程
             log_callback: 選用，日誌回呼
 
@@ -153,6 +155,9 @@ class NoteReviewSubagent:
 
 ## 【完整問診對話紀錄】
 {interview_dialogue or '（無問診對話紀錄）'}
+
+## 【診間對話逐字稿】
+{voice_transcript or '（空白）'}
 
 ## 【當輪讀取檔案暫存區】
 {loaded_files_block if loaded_files_block else '（空白）'}

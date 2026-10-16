@@ -94,6 +94,8 @@ class MainAgent:
             base_url=main_config.get("api_url", "http://localhost:1234/v1"),
             api_key=main_config.get("api_key", "lm-studio"),
         )
+        # 錄音時鐘：() -> (已錄下的秒數 | None, 是否暫停)。UI 在每個主輪提供；None 代表這個 session 沒有錄音。
+        self.rec_clock: Callable[[], tuple[float | None, bool]] | None = None
         self.model = main_config.get("model_name", "")
         self.max_tokens = int(main_config.get("max_tokens", 4000))
         self.temperature = float(main_config.get("temperature", 0.7))
@@ -701,9 +703,14 @@ class MainAgent:
         record_history_current_index: int | None = None,
         on_step: Optional[Callable[[dict], None]] = None,
         log_callback: Optional[Callable[[str], None]] = None,
+        voice_transcript: str = "",
+        rec_clock: Optional[Callable[[], tuple[float | None, bool]]] = None,
     ) -> dict[str, Any]:
         """
         處理一個主輪的使用者訊息。
+
+        voice_transcript: 診間對話逐字稿（語音辨識所得）在這個主輪開始時的凍結快照；空字串代表沒有。
+        rec_clock: 取得「已錄下的秒數、是否暫停」的函式，用來標示病歷版本在錄音時間軸上的位置。
 
         Returns:
             {
@@ -747,6 +754,7 @@ class MainAgent:
         self._manual_stop_event.clear()
         self._current_step_snapshot = None
         self._stop_snapshot = None
+        self.rec_clock = rec_clock
 
         self.turn_count += 1
         turn_num = self.turn_count
@@ -777,6 +785,7 @@ class MainAgent:
             last_visit_block=last_visit_block,
             history_summary=history_summary,
             interview_dialogue=interview_dialogue,
+            voice_transcript=voice_transcript,
             record_history_snapshots=record_history_snapshots,
             record_history_current_index=record_history_current_index,
             steps=[],
@@ -799,9 +808,13 @@ class MainAgent:
         record_history_current_index: int | None = None,
         on_step: Optional[Callable[[dict], None]] = None,
         log_callback: Optional[Callable[[str], None]] = None,
+        voice_transcript: str | None = None,
+        rec_clock: Optional[Callable[[], tuple[float | None, bool]]] = None,
     ) -> dict[str, Any]:
         """
         IC Subagent 完成後，注入結果並繼續 ReAct 迴圈。
+
+        voice_transcript: 問診期間錄音仍在進行時，逐字稿又長了；None 沿用暫停前這個主輪用的那份。
 
         Args:
             interview_dialogue: 完整問診對話紀錄
@@ -826,6 +839,8 @@ class MainAgent:
 
         s = self._suspended
         self._suspended = None
+        if rec_clock is not None:
+            self.rec_clock = rec_clock
 
         def _log(msg: str):
             if log_callback:
@@ -853,6 +868,7 @@ class MainAgent:
             last_visit_block=s["last_visit_block"],
             history_summary=s["history_summary"],
             interview_dialogue=interview_dialogue,
+            voice_transcript=voice_transcript if voice_transcript is not None else s.get("voice_transcript", ""),
             record_history_snapshots=(
                 record_history_snapshots
                 if record_history_snapshots is not None
@@ -915,6 +931,7 @@ class MainAgent:
         record_history_current_index: int | None,
         steps: list[dict],
         sub_turn_start: int,
+        voice_transcript: str = "",
         turn_num: int,
         original_note: str,
         original_at: str,
@@ -1023,6 +1040,7 @@ class MainAgent:
                 session_date=session_date,
                 steps=steps,
                 interview_dialogue=interview_dialogue,
+                voice_transcript=voice_transcript,
                 record_diff_context=_current_record_diff_context(),
             )
 
@@ -1200,6 +1218,7 @@ class MainAgent:
                     last_visit_block=last_visit_block,
                     history_summary=history_summary,
                     interview_dialogue=interview_dialogue,
+                    voice_transcript=voice_transcript,
                     record_diff_context=_current_record_diff_context(),
                     forum_history=self._format_forum_history(),
                     loaded_files_block=self._format_loaded_files_block(),
@@ -1225,6 +1244,7 @@ class MainAgent:
                             "source": f"{step_label} update_record",
                             "target_field": target_field,
                             "result": step_record["result"],
+                            **self._rec_fields(),
                         })
                     _log(f"[Main Agent] Record Subagent: {ops_summary} {review_info}")
                     self._behavior_event(
@@ -1294,6 +1314,7 @@ class MainAgent:
                     "conversation_history": conversation_history,
                     "last_visit_block": last_visit_block,
                     "history_summary": history_summary,
+                    "voice_transcript": voice_transcript,
                     "record_history_snapshots": record_history_snapshots,
                     "record_history_current_index": record_history_current_index,
                     "original_note": original_note,
@@ -1336,6 +1357,7 @@ class MainAgent:
                     lc_result = self.lc_subagent.execute(
                         note_content=current_note,
                         interview_dialogue=interview_dialogue,
+                        voice_transcript=voice_transcript,
                         conversation_history=conversation_history,
                         last_visit_block=last_visit_block,
                         history_summary=history_summary,
@@ -1364,6 +1386,7 @@ class MainAgent:
                                     "source": f"{step_label} low_confidence_check",
                                     "target_field": "note",
                                     "result": step_record["result"],
+                                    **self._rec_fields(),
                                 })
                         _log(f"[Main Agent] LC: {step_record['result']}")
                     else:
@@ -1404,6 +1427,7 @@ class MainAgent:
                 nr_result = self.nr_subagent.execute(
                     note_content=current_note,
                     interview_dialogue=interview_dialogue,
+                    voice_transcript=voice_transcript,
                     conversation_history=conversation_history,
                     record_diff_context=_current_record_diff_context(),
                     loaded_files_block=self._format_loaded_files_block(),
@@ -1463,6 +1487,7 @@ class MainAgent:
                         "conversation_history": conversation_history,
                         "last_visit_block": last_visit_block,
                         "history_summary": history_summary,
+                        "voice_transcript": voice_transcript,
                         "record_history_snapshots": record_history_snapshots,
                         "record_history_current_index": record_history_current_index,
                         "original_note": original_note,
@@ -2035,6 +2060,7 @@ class MainAgent:
         steps: list[dict],  # 本主輪的子輪步驟
         interview_dialogue: str = "",
         record_diff_context: str = "",
+        voice_transcript: str = "",
     ) -> str:
         """建立包含完整上下文的 user prompt。"""
 
@@ -2120,6 +2146,10 @@ class MainAgent:
         parts.append(f"""## 【完整問診對話紀錄】
 {interview_dialogue if interview_dialogue else '（空白）'}""")
 
+        # 診間對話逐字稿（語音辨識所得；接在完整問診對話紀錄之後）
+        parts.append(f"""## 【診間對話逐字稿】
+{voice_transcript if voice_transcript else '（空白）'}""")
+
         # 醫療問答討論區
         forum_text = self._format_forum_history()
         parts.append(f"""## 【醫療問答討論區】
@@ -2155,6 +2185,21 @@ class MainAgent:
         parts.append("請根據以上資訊，決定你的下一步動作。輸出 JSON。")
 
         return "\n\n".join(parts)
+
+    def _rec_fields(self) -> dict[str, Any]:
+        """The recording clock to stamp on a version the agent makes now ({} when the session has no recording)."""
+        if self.rec_clock is None:
+            return {}
+        try:
+            seconds, paused = self.rec_clock()
+        except Exception:
+            return {}
+        if seconds is None:
+            return {}
+        fields: dict[str, Any] = {"rec_t": round(float(seconds), 2)}
+        if paused:
+            fields["rec_paused"] = True
+        return fields
 
     def _call_llm(
         self,

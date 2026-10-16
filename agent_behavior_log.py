@@ -14,6 +14,7 @@ AGENT_COLUMNS = [
     ("low_confidence_subagent", "低信心標註 Subagent"),
     ("note_review_subagent", "病歷檢查員 Subagent"),
     ("professor_subagent", "醫學教授 Subagent"),
+    ("voice_subagent", "語音辨識"),
 ]
 
 

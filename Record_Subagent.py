@@ -226,6 +226,7 @@ class RecordSubagent:
         last_visit_block: str = "",
         history_summary: str = "",
         interview_dialogue: str = "",
+        voice_transcript: str = "",
         record_diff_context: str = "",
         forum_history: str = "",
         loaded_files_block: str = "",
@@ -245,6 +246,7 @@ class RecordSubagent:
             last_visit_block: 上次就診病歷內容
             history_summary: 歷史病歷摘要
             interview_dialogue: 完整問診對話紀錄
+            voice_transcript: 診間對話逐字稿（語音辨識所得；接在完整問診對話紀錄之後）
             forum_history: 醫療問答討論區內容
             loaded_files_block: 當輪讀取檔案暫存區內容
             log_callback: 選用，日誌回呼函式
@@ -306,6 +308,11 @@ class RecordSubagent:
 {interview_dialogue if interview_dialogue else '（空白）'}
 """
 
+        voice_section = f"""
+## 【診間對話逐字稿】
+{voice_transcript if voice_transcript else '（空白）'}
+"""
+
         forum_section = f"""
 ## 【醫療問答討論區】
 {forum_history if forum_history else '（空白）'}
@@ -323,7 +330,7 @@ class RecordSubagent:
 
         user_prompt = f"""## 【指定更新欄位】
 {target_field}
-{conversation_section}{interview_section}{forum_section}{loaded_files_section}{record_diff_section}
+{conversation_section}{interview_section}{voice_section}{forum_section}{loaded_files_section}{record_diff_section}
 ## 【今日病歷(或當前編輯頁面的病歷) - {other_field_name}（參考用，不可修改）】
 {other_content if other_content else '（空白）'}
 
@@ -573,6 +580,7 @@ class RecordSubagent:
                 last_visit_block=last_visit_block,
                 history_summary=history_summary,
                 interview_dialogue=interview_dialogue,
+                voice_transcript=voice_transcript,
                 record_diff_context=record_diff_context,
                 forum_history=forum_history,
                 loaded_files_block=loaded_files_block,
@@ -653,6 +661,10 @@ class RecordSubagent:
                 if interview_dialogue:
                     interview_rewrite_section = f"""\n## 【完整問診對話紀錄】
 {interview_dialogue}
+"""
+                if voice_transcript:
+                    interview_rewrite_section += f"""\n## 【診間對話逐字稿】
+{voice_transcript}
 """
 
                 forum_rewrite_section = f"""

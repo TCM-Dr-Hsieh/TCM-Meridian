@@ -1,0 +1,109 @@
+# Speech-recognition worker environment for TCM-Meridian (.venv-asr).  Windows x64, CPython 3.12, NVIDIA GPU, PyTorch CUDA 12.8.
+#
+# SELF-CONTAINED: installed into its own venv that does NOT use any other Python environment's packages
+# (no conda, no TCM_dev). setup.ps1 creates the venv and runs:
+#     .\.venv-asr\Scripts\python.exe -m pip install -r requirements-asr.txt
+#
+# What it is : 94 packages = everything qwen-asr 0.0.6 + torch declare (dependency closure), exact versions measured on
+#              a reference PC (RTX 5080 Laptop) where ASR + ForcedAligner run fast on GPU. Deliberate deviations:
+#                psutil 5.9.0 -> 5.9.4   (5.9.0 has no Python 3.12 wheel on PyPI)
+#                sox 1.5.0 has no wheel  (pure Python; pip builds it from source, no compiler needed)
+# Needs      : an NVIDIA driver new enough for CUDA 12.8 (Windows driver >= ~570). torch is pinned to the +cu128 build
+#              on purpose: if pip cannot find it, the install FAILS instead of silently installing the slow CPU wheel.
+# Download   : roughly 4 GB (the torch wheel alone is ~3.3 GB).
+#
+--extra-index-url https://download.pytorch.org/whl/cu128
+torch==2.7.1+cu128
+accelerate==1.12.0
+aiofiles==24.1.0
+annotated-doc==0.0.4
+annotated-types==0.7.0
+anyio==4.13.0
+av==15.0.0
+blinker==1.9.0
+brotli==1.2.0
+certifi==2026.5.20
+cffi==1.17.1
+charset-normalizer==3.4.7
+click==8.4.1
+colorama==0.4.6
+Cython==3.3.0
+decorator==5.3.1
+dyNET38==2.2
+fastapi==0.116.1
+ffmpy==1.0.0
+filelock==3.29.0
+Flask==3.1.3
+fsspec==2026.4.0
+gradio==5.40.0
+gradio_client==1.11.0
+groovy==0.1.2
+h11==0.16.0
+httpcore==1.0.9
+httpx==0.28.1
+huggingface_hub==0.36.2
+idna==3.17
+itsdangerous==2.2.0
+Jinja2==3.1.6
+joblib==1.5.1
+lazy-loader==0.6
+librosa==1.0.0
+llvmlite==0.49.0
+markdown-it-py==4.2.0
+MarkupSafe==3.0.3
+mdurl==0.1.2
+mpmath==1.3.0
+msgpack==1.2.2
+nagisa==0.2.11
+networkx==3.3
+numba==0.67.0
+numpy==2.4.6
+orjson==3.10.14
+packaging==26.2
+pandas==2.3.3
+pillow==11.3.0
+platformdirs==4.3.7
+pooch==1.9.0
+psutil==5.9.4
+pycparser==2.21
+pydantic==2.11.7
+pydantic_core==2.33.2
+pydub==0.25.1
+Pygments==2.20.0
+python-dateutil==2.9.0.post0
+python-multipart==0.0.20
+pytz==2026.2
+PyYAML==6.0.3
+qwen-asr==0.0.6
+qwen-omni-utils==0.0.9
+regex==2024.11.6
+requests==2.34.2
+rich==15.0.0
+ruff==0.15.15
+safehttpx==0.1.7
+safetensors==0.5.3
+scikit-learn==1.7.1
+scipy==1.16.0
+semantic-version==2.10.0
+setuptools==72.1.0
+shellingham==1.5.4
+six==1.17.0
+soundfile==0.13.1
+sox==1.5.0
+soxr==1.1.0
+soynlp==0.0.493
+starlette==0.47.2
+sympy==1.13.3
+threadpoolctl==3.6.0
+tokenizers==0.22.2
+tomlkit==0.13.3
+tqdm==4.67.3
+transformers==4.57.6
+typer==0.26.4
+typing-inspection==0.4.2
+typing_extensions==4.12.2
+tzdata==2026.2
+urllib3==2.7.0
+uvicorn==0.48.0
+websockets==15.0.1
+Werkzeug==3.1.8

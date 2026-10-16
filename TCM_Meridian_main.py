@@ -19,7 +19,7 @@ from __future__ import annotations
 import os
 from datetime import datetime
 
-from nicegui import ui
+from nicegui import app as nicegui_app, ui
 from ui_app.context import AppContext
 from ui_app.controllers.auto_interview_controller import AutoInterviewController
 from ui_app.controllers.agent_behavior_controller import build_agent_behavior_tab
@@ -32,9 +32,16 @@ from ui_app.controllers.patient_controller import build_patient_registration_tab
 from ui_app.controllers.professor_controller import build_professor_settings_tab
 from ui_app.controllers.tab_controller import TabController
 from ui_app.controllers.template_controller import build_record_template_tab
+from ui_app.controllers.record_reference_panel import RecordReferencePanel
+from ui_app.controllers.voice_controller import VoiceController
 from ui_app.services.config_service import load_json_config, save_json_config
 from ui_app.services.app_services import create_app_services
 from ui_app.shell import TabSpec, build_header, build_tab_shell
+from ui_app.voice_assets import register_voice_web
+from voice.config import VoiceSettings
+from voice.replay import register_replay_routes
+from voice.remote import register_routes as register_remote_audio_routes
+from voice.service import shared_manager
 
 # ════════════════════════════════════════════════════════════════
 # 全域設定
@@ -152,6 +159,8 @@ def _default_config() -> dict:
                 "model_name": "",
             },
         },
+        "voice_config": VoiceSettings().to_dict(),
+        "note_edit": {"min_surviving_run": 3},
     }
 
 
@@ -161,6 +170,18 @@ def load_config() -> dict:
 
 def save_config(cfg: dict):
     save_json_config(CONFIG_PATH, cfg)
+
+
+# ════════════════════════════════════════════════════════════════
+# 語音功能（背景錄音與即時辨識；與 session 綁定，視窗只是檢視）
+# ════════════════════════════════════════════════════════════════
+voice_manager = shared_manager(load_config=load_config)      # 全程序共用一個（NiceGUI script mode 每個連線都會重跑本腳本）
+app_state["_voice_manager"] = voice_manager
+register_voice_web(nicegui_app, ui)                          # 瀏覽器端腳本（遠端麥克風、回聽、浮動視窗）與樣式
+register_remote_audio_routes(nicegui_app)                    # 遠端麥克風的 WebSocket
+register_replay_routes(nicegui_app, voice_manager)           # 回聽用的音檔切片
+nicegui_app.on_startup(voice_manager.schedule_preload)       # 有語音模型就預載到 VRAM；沒有就什麼都不做
+nicegui_app.on_shutdown(voice_manager.shutdown)
 
 
 # ════════════════════════════════════════════════════════════════
@@ -368,6 +389,10 @@ def get_auto_interview_controller() -> AutoInterviewController:
 def build_ui():
     """建構整個 NiceGUI 介面"""
     build_header(ui, TODAY)
+    # 語音視窗放在分頁之外，切換頁面時不會消失；左欄的「語音功能」按鈕在主介面分頁建立時綁定。
+    VoiceController(ui=ui, app_state=app_state, manager=voice_manager).build()
+    # 修改病歷時的「參考版本」浮動視窗（顯示帶來源標籤的原文）同理放在分頁之外
+    RecordReferencePanel(ui=ui, app_state=app_state).build()
     build_tab_shell(ui, app_state, _tab_specs())
 
 

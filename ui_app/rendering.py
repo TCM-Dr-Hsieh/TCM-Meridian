@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import difflib
+import html
 import re
 from datetime import date
 
 from deidentification_utils import format_birthday_with_age
-from record_edit_tags import tag_human_edits
+from record_edit_tags import HUMAN_EDIT_TAG, render_pieces, tag_human_edits
 
 
 def simple_md_render(text: str) -> str:
@@ -36,6 +37,23 @@ def simple_md_render(text: str) -> str:
 def strip_citations(text: str) -> str:
     """Hide square-bracket source tags in browse mode."""
     return re.sub(r"\s*\[[^\]]*\]", "", text)
+
+
+def reference_html(text: str, *, marks: bool = False) -> str:
+    """A record as the read-only reference window shows it: text as written, every source tag in light colour and (NOTE)
+    every low-confidence mark as its phrase in bold followed by the reason."""
+    if not (text or "").strip():
+        return '<span style="color:#aaa;">（空白）</span>'
+    parts = []
+    for kind, piece, reason in render_pieces(text, marks):
+        if kind == "tag":
+            manual = " manual" if piece == HUMAN_EDIT_TAG else ""
+            parts.append(f'<span class="src-tag{manual}">{html.escape(piece)}</span>')
+        elif kind == "mark":
+            parts.append(f'<b class="lc-note">{html.escape(piece)}<span class="lc-why">（{html.escape(reason)}）</span></b>')
+        else:
+            parts.append(html.escape(piece))
+    return "".join(parts)
 
 
 def patient_info_html(basic_info: dict, reference_date: str | None = None) -> str:

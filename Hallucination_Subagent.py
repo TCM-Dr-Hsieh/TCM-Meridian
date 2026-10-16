@@ -75,6 +75,7 @@ class HallucinationSubagent:
         last_visit_block: str = "",
         history_summary: str = "",
         interview_dialogue: str = "",
+        voice_transcript: str = "",
         record_diff_context: str = "",
         forum_history: str = "",
         loaded_files_block: str = "",
@@ -120,6 +121,11 @@ class HallucinationSubagent:
 {interview_dialogue if interview_dialogue else '（空白）'}
 """
 
+        voice_section = f"""
+## 【診間對話逐字稿】
+{voice_transcript if voice_transcript else '（空白）'}
+"""
+
         forum_section = f"""
 ## 【醫療問答討論區】
 {forum_history if forum_history else '（空白）'}
@@ -137,7 +143,7 @@ class HallucinationSubagent:
 內容：
 {content}
 {record_diff_text}
-{conversation_section}{interview_section}{forum_section}{loaded_files_section}
+{conversation_section}{interview_section}{voice_section}{forum_section}{loaded_files_section}
 請根據以上資訊，進行幻覺與過度聲稱審查。輸出 JSON。"""
 
         messages = [

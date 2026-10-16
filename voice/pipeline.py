@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import asdict, dataclass, field, fields
-from typing import Callable
+from typing import Callable, NamedTuple
 
 from .config import ASRSettings
 from .textutil import format_clock, join_texts, script
@@ -70,6 +70,13 @@ class TranscriptSnapshot:
     unlocked: list[int]
     pending: int
     marked: bool = False   # the lines carry speaker marks
+
+
+class Reach(NamedTuple):
+    """What the transcript held at one moment, as a record version keeps it."""
+    seconds: float        # where it reaches: the end of its latest segment that has a line
+    hidden: list[int]     # segments inside that reach not wholly in it, that may still show more (see `reach_and_hidden`)
+    last: int             # the number of its latest segment that has a line (0 = none): numbers only grow, so it orders exactly
 
 
 def gap_marker(start: float, end: float) -> str:
@@ -148,17 +155,29 @@ class TranscriptPipeline:
         gets then must count as appearing after the point reached now."""
         return max((s.end for s in self.segments if written.get(s.index)), default=0.0)
 
-    def reach_and_hidden(self) -> tuple[float, list[int]]:
-        """(where the transcript reaches, the segments inside that reach that are not in it now but may still get a line). The reach alone
-        cannot say that a segment in the middle is missing: a background voice judged to be a foreground one later, or a segment the rolling
-        correction has not filled yet, ends before the reach and still appears after it. A version names them, so what it was made against
-        can be told from what came later. An empty segment that is locked is silence for good and is not listed."""
-        written = self._written(self._marked())
+    def reach_and_hidden(self) -> Reach:
+        """Where the transcript reaches, its latest segment, and the segments inside that reach that are not wholly in it now but may still
+        show more. The reach alone cannot say that a segment in the middle is missing: a background voice judged to be a foreground one
+        later, or a segment the rolling correction has not filled yet, ends before the reach and still appears after it. A segment of which
+        only a part was left out as background voices is listed too: its other words are on the screen, but the words that may come back
+        are not, and the whole segment is treated as later (the conservative side). An empty segment that is locked is silence for good
+        and is not listed."""
+        marked = self._marked()
+        written = self._written(marked)
         reach = self._reach(written)
         pending = set(self.unlocked_indexes())
-        hidden = [s.index for s in self.segments
-                  if s.kind == 'speech' and s.end <= reach and not written.get(s.index) and (s.visible or s.index in pending)]
-        return reach, hidden
+        hidden = []
+        for s in self.segments:
+            if s.kind != 'speech' or s.end > reach:
+                continue
+            line = written.get(s.index)
+            if not line:
+                if s.visible or s.index in pending:
+                    hidden.append(s.index)
+            elif line != self.line(s, marked, keep_background=True):        # some of its words were filtered out as background voices
+                hidden.append(s.index)
+        last = max((s.index for s in self.segments if written.get(s.index)), default=0)
+        return Reach(reach, hidden, last)
 
     @property
     def upto(self) -> float:

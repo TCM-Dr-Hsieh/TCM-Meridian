@@ -472,3 +472,40 @@ def test_the_diff_says_which_transcript_lines_were_on_the_screen_when_a_version_
     long.push("甲", "", source="AI", rec_t=10)
     long.push("乙", "", source="人類修改", rec_t=4000)
     assert "逐字稿 #9 在畫面上" in build_record_diff_context(long.snapshots, 1, voice_transcript="語音#9 1:02:03–1:05:00 好")
+
+
+
+def test_lines_are_ordered_against_a_version_by_segment_number_not_by_the_second_they_show():
+    from voice.service import Position
+    from Main_Agent import MainAgent
+    agent = MainAgent.__new__(MainAgent)
+    agent.rec_clock = lambda: Position(9.1, False, (), 1)
+    assert agent._rec_fields() == {"rec_t": 9.1, "rec_seen": 1}
+    # the edit at 9.1 s saw #1 (ends 9.1 s); #2 ends at 9.9 s: both read 00:09
+    transcript = "語音#1 00:02–00:09 頭痛三天\n語音#2 00:09–00:09 還有胸痛"
+    history = SnapshotHistory()
+    history.push("甲", "", source="AI", rec_t=1, rec_seen=0)
+    history.push("乙" + HUMAN_EDIT_TAG, "", source="人類修改", rec_t=9.1, rec_seen=1)
+    assert history.snapshots[1]["rec_seen"] == 1
+    out = build_record_diff_context(history.snapshots, 1, voice_transcript=transcript)
+    assert "（版本 2 的逐字稿先後：逐字稿 #1 在畫面上，早於這個版本；逐字稿 #2 晚於這個版本。）" in out
+    # without the number, the same second cannot be placed: it is not declared old
+    plain = SnapshotHistory()
+    plain.push("甲", "", source="AI", rec_t=1)
+    plain.push("乙", "", source="人類修改", rec_t=9.1)
+    assert "（版本 2 的逐字稿先後：逐字稿 #1~#2 晚於這個版本。）" in build_record_diff_context(plain.snapshots, 1, voice_transcript=transcript)
+    # a number and a hidden one together
+    both = SnapshotHistory()
+    both.push("甲", "", source="AI", rec_t=1, rec_seen=0)
+    both.push("乙", "", source="人類修改", rec_t=9.1, rec_seen=2, rec_hidden=[1])
+    assert "逐字稿 #2 在畫面上，早於這個版本；逐字稿 #1 晚於這個版本" in build_record_diff_context(both.snapshots, 1, voice_transcript=transcript)
+
+
+def test_the_last_version_of_an_agent_turn_keeps_the_latest_segment_of_the_turns_clock():
+    history = SnapshotHistory()
+    history.push("a", "", source="init")
+    processor = make_processor(history, (99.0, False))
+    result = {"note_changed": True, "at_changed": False, "turn_number": 3, "note": "d", "at": "",
+              "record_snapshots": [{"note": "c", "at": "", "source": "Turn 3-2 update_record", "rec_t": 40.0, "rec_seen": 5}]}
+    processor._apply_record_changes(result, "fp", "dt")
+    assert [snap.get("rec_seen") for snap in history.snapshots] == [None, 5, 5]

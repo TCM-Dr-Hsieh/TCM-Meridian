@@ -622,7 +622,7 @@ async def test_a_middle_segment_that_was_background_is_named_as_not_yet_on_the_s
     pipeline.speaker = OnlyBackground({2})                                  # #2 is judged to be a background voice when the physician edits
     position = manager.recording_position(patient, DATE)
     assert position == (9.0, True) and isinstance(position, Position) and position.hidden == (2,)
-    assert pipeline.reach_and_hidden() == (9.0, [2])
+    assert pipeline.reach_and_hidden() == (9.0, [2], 3) and position.last == 3
     seconds, paused = position                                              # it still unpacks like the pair it was
     pipeline.speaker = OnlyBackground(set())                                # judged again: #2 is foreground and appears after the edit
     after = manager.recording_position(patient, DATE)
@@ -638,12 +638,12 @@ async def test_only_segments_that_may_still_get_a_line_are_named(patient):
     pipeline.segments[:] = [segment_of(1, 0.0, 3.0, ''), segment_of(2, 3.0, 5.0, '我頭痛'), segment_of(3, 5.0, 7.0, ''),
                             segment_of(4, 7.0, 9.0, '三天了')]
     assert pipeline.finished is True                                        # nothing is being corrected: an empty segment is silence for good
-    assert pipeline.reach_and_hidden() == (9.0, [])
+    assert pipeline.reach_and_hidden() == (9.0, [], 4)
     pipeline.finished = False                                               # the rolling correction still works on the last two
     pipeline.rolling_start = 0
-    assert pipeline.reach_and_hidden() == (9.0, [3])                        # #3 is empty and may be filled; #1 is locked: silence
+    assert pipeline.reach_and_hidden() == (9.0, [3], 4)                        # #3 is empty and may be filled; #1 is locked: silence
     pipeline.segments[3].corrected = ''                                     # a tail that is empty is outside the reach, not a hidden one
-    assert pipeline.reach_and_hidden() == (5.0, [])
+    assert pipeline.reach_and_hidden() == (5.0, [], 2)
 
 
 async def test_the_frozen_clock_and_a_session_not_loaded_carry_the_hidden_segments_too(patient):
@@ -669,3 +669,61 @@ async def test_the_frozen_clock_and_a_session_not_loaded_carry_the_hidden_segmen
     assert restarted.recording_position(patient, DATE).hidden == ()
     frozen = clock()
     assert frozen == (9.0, True) and frozen.hidden == (2,)                  # the frozen clock still says #2 came later
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# A segment of which only some words were left out as background voices; the order of lines by segment number
+# ---------------------------------------------------------------------------------------------------------------------
+class PartBackground(OnlyBackground):
+    """The listed segments lose their first sentence as a background voice; their other words stay."""
+
+    def body(self, segment, *, marks, keep_background=False):
+        if segment.index in self.background and not keep_background:
+            return segment.corrected.split('。', 1)[1]
+        return None
+
+
+async def test_a_segment_that_lost_only_some_words_to_the_background_filter_is_named(patient):
+    manager = make_manager()
+    manager.attach(patient, DATE)
+    await record(manager, 7)
+    pipeline = manager.session.pipeline
+    pipeline.segments[:] = [segment_of(1, 0.0, 4.0, '我頭痛三天'), segment_of(2, 4.0, 7.0, '胸痛。口乾。'), segment_of(3, 7.0, 9.0, '大概三天')]
+    pipeline.speaker = PartBackground({2})                                  # "胸痛" is taken for a background voice; "口乾" stays
+    text = pipeline.snapshot().text
+    assert '口乾' in text and '胸痛' not in text
+    position = manager.recording_position(patient, DATE)
+    assert position == (9.0, True) and position.hidden == (2,) and position.last == 3     # #2 has a line, yet it is not all there
+    pipeline.speaker = PartBackground(set())                                # judged again: "胸痛" comes back
+    assert '胸痛' in pipeline.snapshot().text and manager.recording_position(patient, DATE).hidden == ()
+
+
+async def test_a_partly_background_segment_is_named_by_the_real_speaker_marks_loaded_or_not(patient):
+    first = make_manager()
+    first.attach(patient, DATE)
+    await record(first, 7)
+    paths = voice_paths(patient, DATE)
+    saved = json.loads(paths.transcript_json.read_text(encoding='utf-8'))
+    saved['segments'] = [vars(segment_of(1, 0.0, 4.0, '我頭痛三天')), vars(segment_of(2, 4.0, 7.0, '胸痛。口乾。')),
+                         vars(segment_of(3, 7.0, 9.0, '大概三天'))]
+    saved['speaker'] = {'status': '', 'roles_trusted': True, 'labels': {
+        '1': [[0, 5, 'doctor', '', 0]], '2': [[0, 3, 'background', '', -1], [3, 6, 'other', '', 1]], '3': [[0, 4, 'doctor', '', 0]]}}
+    paths.transcript_json.write_text(json.dumps(saved), encoding='utf-8')
+    restarted = make_manager()
+    offline = restarted.recording_position(patient, DATE)
+    assert offline == (9.0, True) and offline.hidden == (2,) and offline.last == 3
+    restarted.attach(patient, DATE)
+    snapshot = restarted.snapshot_text(patient, DATE)
+    assert '口乾' in snapshot and '胸痛' not in snapshot                    # the real SpeakerService leaves the background words out
+    loaded = restarted.recording_position(patient, DATE)
+    assert loaded == offline and loaded.hidden == (2,) and loaded.last == 3
+
+
+async def test_the_frozen_clock_keeps_the_latest_segment_it_was_made_with(patient):
+    manager = make_manager()
+    manager.attach(patient, DATE)
+    await record(manager, 7)
+    clock = manager.frozen_clock(patient, DATE)
+    last = manager.recording_position(patient, DATE).last
+    await record(manager, 4)
+    assert manager.recording_position(patient, DATE).last > last and clock().last == last

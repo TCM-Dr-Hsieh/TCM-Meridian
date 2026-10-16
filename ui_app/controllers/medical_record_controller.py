@@ -294,7 +294,7 @@ class MedicalRecordController:
             before_index = self.history.current_index
             position = self._recording_position()
             rec_t, rec_paused = position[0], position[1]
-            rec_hidden = getattr(position, "hidden", None)
+            rec_hidden, rec_seen = getattr(position, "hidden", None), getattr(position, "last", None)
             removed = [{"field": "NOTE", "tag": r.tag, "text": r.text} for r in note_merge.removed] + [
                 {"field": "A&T", "tag": r.tag, "text": r.text} for r in at_merge.removed
             ]
@@ -305,7 +305,7 @@ class MedicalRecordController:
             if dropped:
                 meta["dropped_marks"] = dropped
             truncated = self.history.push(
-                new_note, new_at, source="人類修改", rec_t=rec_t, rec_paused=rec_paused, rec_hidden=rec_hidden, meta=meta or None,
+                new_note, new_at, source="人類修改", rec_t=rec_t, rec_paused=rec_paused, rec_hidden=rec_hidden, rec_seen=rec_seen, meta=meta or None,
                 after_turn=self._main_turns_so_far(),
             )
             if truncated:

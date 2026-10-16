@@ -87,16 +87,22 @@ def _transcript_ends(transcript: str) -> dict[int, int]:
 
 
 def _transcript_note(index: int, snapshot: dict[str, Any], ends: dict[int, int]) -> str:
-    """Which transcript lines were on the screen when this version was made and which came after, worked out from its recording clock and
-    the segments it names as not yet there, so the reviewer reads the order instead of comparing mm:ss itself."""
+    """Which transcript lines were on the screen when this version was made and which came after, so the reviewer reads the order instead
+    of comparing mm:ss itself. Worked out from the number of the latest segment then on the screen (`rec_seen`; numbers only grow) and the
+    segments the version names as not wholly there. Without the number, by whole seconds -- the only precision the lines show -- and a line
+    that ends in the same second as the clock cannot be placed, so it is taken as later (it is not declared old on a guess)."""
     if not ends:
         return ""
     rec_t = snapshot.get("rec_t")
     if rec_t is None:
         return f"（版本 {index} 的逐字稿先後：全部逐字稿都晚於這個版本，它是錄音開始前做的。）"
-    limit = int(float(rec_t))
     hidden = {int(item) for item in snapshot.get("rec_hidden") or [] if isinstance(item, int) and not isinstance(item, bool)}
-    before = [number for number, end in ends.items() if end <= limit and number not in hidden]
+    seen = snapshot.get("rec_seen")
+    if isinstance(seen, int) and not isinstance(seen, bool):
+        before = [number for number in ends if number <= seen and number not in hidden]
+    else:
+        limit = int(float(rec_t))
+        before = [number for number, end in ends.items() if end < limit and number not in hidden]
     placed = set(before)
     after = [number for number in ends if number not in placed]
     parts = []

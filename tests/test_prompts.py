@@ -70,6 +70,7 @@ def test_the_doctor_edit_principles_replace_the_old_keep_the_old_source_beside_i
         assert "那是醫師修改當下已錄下的音訊長度" not in text, name
         assert "逐字稿 #N 當時還沒出現在畫面上" in text and "照修改之後處理" in text, name
         assert "（版本 N 的逐字稿先後：…）" in text and "直接採用" in text, name
+        assert "同一秒內分不出先後，視為之後" in text and "只有部分文字被當成背景時，整段都算" in text, name
         assert "HbA1c 7.8%[人類醫師_手動修改]；另有紀錄 HbA1c 7.1%" not in text, name
     assert "醫師修正與資訊衝突處理原則" in read("main")
 

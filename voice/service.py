@@ -239,11 +239,9 @@ class VoiceSession:
         self.speaker_note = ''
         previous = self.speaker
         if not config.enabled:
-            if previous is not None and not previous.frozen:
-                # Marking was switched off since the last run of this transcript: the marks it made stay (shown, handed to the
-                # prompts as they were), but it must not mark anything new, so it becomes a display-only service.
-                await previous.stop()
-                previous.frozen = True
+            # Marking was switched off since the last run of this transcript: the marks it made stay (shown, handed to the
+            # prompts as they were, unless "use in jobs" is off now), but it must not mark anything new.
+            await self._retire_speaker(previous, config)
             return None
         if previous is not None and not previous.frozen and not previous.failed and previous.settings == config:
             # Stop, then start in the same run with the same settings: the voice groups and role map are still there. The model
@@ -258,6 +256,7 @@ class VoiceSession:
         except Exception as exc:
             self.speaker_note = f'說話者標記未啟用：{exc}'
             self.emit('speaker_unavailable', reason=str(exc))
+            await self._retire_speaker(previous, config)         # the old service must not keep taking this run's segments
             return None
         self.emit('speaker_started', model=config.model_path, unknown_percentile=config.unknown_percentile,
                   text_fill=config.text_fill, text_fill2=config.text_fill2, use_in_jobs=config.use_in_jobs,
@@ -270,6 +269,16 @@ class VoiceSession:
             service.restore_labels(previous.labels_doc(), previous.marks_in_text)
         self.speaker = service
         return service
+
+    @staticmethod
+    async def _retire_speaker(previous: SpeakerService | None, config) -> None:
+        """An earlier run's speaker service that no new run continues becomes display-only: it shows its marks (and hands them to the
+        prompts per the settings now in force) and takes no new text."""
+        if previous is None or previous.frozen:
+            return
+        await previous.stop()
+        previous.frozen = True
+        previous.settings = config
 
     async def _watch(self):
         """Persist the transcript periodically, surface microphone errors, keep the screen's clock moving."""

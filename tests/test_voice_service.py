@@ -373,3 +373,41 @@ async def test_a_continued_recording_follows_the_speaker_settings_in_force_now(p
     await record(manager, 4)
     third = manager.session.speaker
     assert third is not second and not third.frozen and manager.session.pipeline.speaker is third
+
+
+async def test_switching_marking_off_also_follows_use_in_jobs_and_a_failed_model_load_retires_the_old_service(patient):
+    from tests.speaker_fakes import FakeEmbedder, bases
+    settings = make_settings()
+    settings.speaker.enabled = True
+    settings.speaker.use_in_jobs = True
+    embedder = FakeEmbedder(bases(2))
+    manager = make_manager(settings=settings)
+    manager.speaker_embedder = lambda path: embedder
+    manager.load_config = lambda: {'voice_config': settings.to_dict()}
+    manager.attach(patient, DATE)
+    await record(manager, 4)
+    first = manager.session.speaker
+    assert first.settings.use_in_jobs is True and embedder.calls > 0       # it took the first run's segments
+    # marking off and "use in jobs" off together: the marks stay on screen, but the agents are not given them any more
+    settings.speaker.enabled = False
+    settings.speaker.use_in_jobs = False
+    await record(manager, 4)
+    assert first.frozen and first.settings.use_in_jobs is False and manager.session.pipeline.speaker is first
+    assert manager.session.pipeline.snapshot().marked is False
+    # on again with another model that cannot be loaded: the old (display-only) service stays, takes nothing, a note says why
+    settings.speaker.enabled = True
+    settings.speaker.use_in_jobs = True
+    await record(manager, 4)
+    second = manager.session.speaker
+    assert second is not first and not second.frozen
+    calls = embedder.calls
+    settings.speaker.unknown_percentile = 30.0              # settings changed...
+
+    def broken(path):
+        raise OSError('model file is gone')
+    manager.speaker_embedder = broken                         # ...and the voiceprint model cannot be loaded
+    second_embedder_calls = embedder.calls
+    await record(manager, 4)
+    assert second.frozen and manager.session.speaker is second and manager.session.pipeline.speaker is second
+    assert '說話者標記未啟用' in manager.session.speaker_note and 'model file is gone' in manager.session.speaker_note
+    assert embedder.calls == second_embedder_calls            # the retired service was not fed this run's segments

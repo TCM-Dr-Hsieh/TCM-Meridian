@@ -42,3 +42,18 @@ def test_the_scripts_are_served_once_but_every_page_gets_its_head_html():
         register_voice_web(app, ui)
     assert served.count(REMOTE_JS_URL) == 1 and len(served) == 2
     assert len(heads) == 8 and any("tcmFloat" in h for h in heads)
+
+
+def test_a_new_app_is_never_mistaken_for_an_earlier_one_whose_memory_address_was_reused():
+    # the marker lives on the app itself: a freed app's id() can be handed to the next one (this used to skip the routes at random)
+    for _ in range(200):
+        app = FastAPI()
+        register_replay_routes(app, SimpleNamespace(session=None))
+        register_routes(app)
+        assert len(routes(app, REPLAY_PATH)) == 1 and len(routes(app, WS_PATH)) == 1
+        shell = SimpleNamespace(add_static_file=lambda **kw: None)
+        served = []
+        shell.add_static_file = lambda **kw: served.append(kw["url_path"])
+        register_voice_web(shell, SimpleNamespace(add_head_html=lambda html: None))
+        assert len(served) == 2
+        del app, shell

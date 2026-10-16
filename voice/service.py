@@ -274,11 +274,12 @@ class VoiceSession:
     async def _retire_speaker(previous: SpeakerService | None, config) -> None:
         """An earlier run's speaker service that no new run continues becomes display-only: it shows its marks (and hands them to the
         prompts per the settings now in force) and takes no new text."""
-        if previous is None or previous.frozen:
+        if previous is None:
             return
-        await previous.stop()
-        previous.frozen = True
-        previous.settings = config
+        if not previous.frozen:
+            await previous.stop()
+            previous.frozen = True
+        previous.settings = config              # every time: "use in jobs" may have changed since it was frozen
 
     async def _watch(self):
         """Persist the transcript periodically, surface microphone errors, keep the screen's clock moving."""

@@ -352,13 +352,10 @@ async def remote_audio_socket(websocket: WebSocket, token: str):
             pass
 
 
-_ROUTED_APPS: set[int] = set()
-
-
 def register_routes(app) -> None:
     """Mount the WebSocket on a FastAPI-style app (NiceGUI's `app`, or a plain FastAPI app in tests). Once per app: NiceGUI's script
     mode runs the main script again for every browser connection."""
-    if id(app) in _ROUTED_APPS:
+    if getattr(app, '_tcm_remote_routed', False):
         return
-    _ROUTED_APPS.add(id(app))
+    app._tcm_remote_routed = True
     app.websocket(WS_PATH + '/{token}')(remote_audio_socket)

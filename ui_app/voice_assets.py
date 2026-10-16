@@ -174,14 +174,11 @@ window.tcmFloat = (function () {
 '''
 
 
-_SERVED_APPS: set[int] = set()
-
-
 def register_voice_web(app, ui) -> None:
     """Serve the browser-side scripts of the voice features (once) and put them and the styles in this page. NiceGUI's script mode
     runs the main script again for every browser connection: the files are served once, the head HTML belongs to each page."""
-    if id(app) not in _SERVED_APPS:
-        _SERVED_APPS.add(id(app))
+    if not getattr(app, '_tcm_voice_web_served', False):
+        app._tcm_voice_web_served = True
         app.add_static_file(local_file=WEB_DIR / 'remote_capture.js', url_path=REMOTE_JS_URL, max_cache_age=0)
         app.add_static_file(local_file=WEB_DIR / 'replay.js', url_path=REPLAY_JS_URL, max_cache_age=0)
     ui.add_head_html(f'<style>{CSS}</style>')

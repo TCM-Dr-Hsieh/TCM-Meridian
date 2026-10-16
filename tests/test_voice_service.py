@@ -411,3 +411,25 @@ async def test_switching_marking_off_also_follows_use_in_jobs_and_a_failed_model
     assert second.frozen and manager.session.speaker is second and manager.session.pipeline.speaker is second
     assert '說話者標記未啟用' in manager.session.speaker_note and 'model file is gone' in manager.session.speaker_note
     assert embedder.calls == second_embedder_calls            # the retired service was not fed this run's segments
+
+
+async def test_a_display_only_speaker_service_follows_use_in_jobs_every_time_it_is_changed(patient):
+    from tests.speaker_fakes import FakeEmbedder, bases
+    settings = make_settings()
+    settings.speaker.enabled = True
+    settings.speaker.use_in_jobs = True
+    manager = make_manager(settings=settings)
+    manager.speaker_embedder = lambda path: FakeEmbedder(bases(2))
+    manager.load_config = lambda: {'voice_config': settings.to_dict()}
+    manager.attach(patient, DATE)
+    await record(manager, 4)
+    first = manager.session.speaker
+    settings.speaker.enabled = False                         # off, "use in jobs" still on: the marks stay in what the agents get
+    await record(manager, 4)
+    assert first.frozen and first.settings.use_in_jobs is True
+    settings.speaker.use_in_jobs = False                     # changed later, while it is already display-only
+    await record(manager, 4)
+    assert first.frozen and first.settings.use_in_jobs is False and manager.session.pipeline.snapshot().marked is False
+    settings.speaker.use_in_jobs = True
+    await record(manager, 4)
+    assert first.settings.use_in_jobs is True

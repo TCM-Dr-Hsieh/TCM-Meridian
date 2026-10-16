@@ -89,16 +89,13 @@ def replay_response(manager, request: Request, start: float, token: str = '') ->
     return Response(body, media_type='audio/wav', headers=headers)
 
 
-_ROUTED_APPS: set[int] = set()
-
-
 def register_replay_routes(app, manager) -> None:
     """Mount the clip route on a FastAPI-style app (NiceGUI's `app`, or a plain FastAPI app in tests). Once per app (NiceGUI's script
     mode runs the main script again for every browser connection): the route serves the `manager` of the first call, which is the
     process-wide one (`voice.service.shared_manager`)."""
-    if id(app) in _ROUTED_APPS:
+    if getattr(app, '_tcm_replay_routed', False):
         return
-    _ROUTED_APPS.add(id(app))
+    app._tcm_replay_routed = True
 
     @app.get(REPLAY_PATH)
     def replay(request: Request, start: float = 0.0, token: str = ''):

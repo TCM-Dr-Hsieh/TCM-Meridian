@@ -28,6 +28,20 @@ def _load_prompt(filename: str) -> str:
 # Information Collection Subagent 類別
 # ════════════════════════════════════════════════════════════════
 
+def format_interview_dialogue(conversations: list[dict]) -> str:
+    """The interview as the other agents read it (「完整問診對話紀錄」). The one formatter of it: the live finish of an interview and the
+    restore of a saved session both use it. Each round header names the Main Agent step that started the interview
+    (`＜第3回合(R3，Turn 2-3)收到回應＞`), which is what lets the version diff say which rounds came before or after an edit."""
+    text = ""
+    for msg in conversations:
+        r = msg.get("round", "?")
+        if msg["role"] == "subagent":
+            text += f"＜第{r}回合(R{r}，{msg['step']})助理提問＞：{msg['content']}\n"
+        elif msg["role"] == "patient":
+            text += f"＜第{r}回合(R{r}，{msg['step']})收到回應＞：{msg['content']}\n"
+    return text
+
+
 class InformationCollectionSubagent:
     """
     問診助理 Subagent：根據主治醫師的資訊蒐集方針，
@@ -238,15 +252,7 @@ class InformationCollectionSubagent:
         if not self.all_conversations:
             return "（無問診對話紀錄）"
 
-        dialogue_text = ""
-        for msg in self.all_conversations:
-            r = msg.get("round", "?")
-            if msg["role"] == "subagent":
-                dialogue_text += f"＜第{r}回合(R{r})助理提問＞：{msg['content']}\n"
-            elif msg["role"] == "patient":
-                dialogue_text += f"＜第{r}回合(R{r})收到回應＞：{msg['content']}\n"
-
-        return dialogue_text
+        return format_interview_dialogue(self.all_conversations)
 
     def get_dialogue_summary_for_history(self) -> str:
         """

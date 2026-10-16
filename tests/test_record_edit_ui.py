@@ -302,6 +302,29 @@ def test_interview_rounds_carry_the_main_turn_that_started_them():
     assert "＜第2回合(R2，Turn 3-2)助理提問＞：多久了？" in text and "＜第2回合(R2，Turn 3-2)收到回應＞：三天" in text
 
 
+def test_the_live_interview_output_carries_the_step_into_the_diff_order_note():
+    """The real path: the assistant creates its round messages, `get_full_dialogue()` hands them to the Main Agent, the diff reads them."""
+    from Information_Collection_Subagent import InformationCollectionSubagent
+    from ui_app.rendering import format_interview_conversations
+    ic = InformationCollectionSubagent({"api_url": "http://fake.invalid/v1", "api_key": "k", "model_name": "m"})
+    log = lambda message: None
+    ic.current_step = "Turn 1-1"
+    ic._parse_and_execute('{"action": "ask_patient", "action_input": "哪裡不舒服？"}', log)       # R1, a question
+    ic._execute_turn = lambda *args, **kwargs: {"action": "finish_collection", "message": "", "round": ic.dialogue_round, "finished": True}
+    ic.receive_answer("頭痛三天")                                                                    # the answer to R1
+    ic.current_step = "Turn 3-2"                                                                      # a later interview, a later step
+    ic._parse_and_execute('{"action": "ask_patient", "action_input": "血糖？"}', log)                # R2
+    ic.receive_answer("HbA1c 7.1%")
+    dialogue = ic.get_full_dialogue()
+    assert "＜第1回合(R1，Turn 1-1)收到回應＞：頭痛三天" in dialogue and "＜第2回合(R2，Turn 3-2)收到回應＞：HbA1c 7.1%" in dialogue
+    assert format_interview_conversations(ic.all_conversations) == dialogue          # a restored session reads the same text
+    history = SnapshotHistory()
+    history.push("a", "", source="init")
+    history.push("b", "", source="人類修改", after_turn=1)
+    text = build_record_diff_context(history.snapshots, history.current_index, interview_dialogue=dialogue)
+    assert "（版本 2 的先後：問診回合 R1 早於這個版本；問診回合 R2 晚於這個版本。）" in text
+
+
 def test_the_interview_keeps_the_step_that_started_it_across_a_save_and_a_restore():
     from Information_Collection_Subagent import InformationCollectionSubagent
     config = {"api_url": "http://fake.invalid/v1", "api_key": "k", "model_name": "m"}

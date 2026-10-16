@@ -293,10 +293,59 @@ def test_a_manual_edit_is_stamped_with_the_main_turns_so_far_and_the_diff_says_s
 def test_interview_rounds_carry_the_main_turn_that_started_them():
     from ui_app.rendering import format_interview_conversations
     text = format_interview_conversations([
-        {"role": "subagent", "content": "哪裡不舒服？", "round": 1, "turn": 2},
-        {"role": "patient", "content": "頭痛", "round": 1, "turn": 2},
-        {"role": "subagent", "content": "多久了？", "round": 2, "turn": 3},
-        {"role": "patient", "content": "三天", "round": 2, "turn": 3},
+        {"role": "subagent", "content": "哪裡不舒服？", "round": 1, "step": "Turn 2-1"},
+        {"role": "patient", "content": "頭痛", "round": 1, "step": "Turn 2-1"},
+        {"role": "subagent", "content": "多久了？", "round": 2, "step": "Turn 3-2"},
+        {"role": "patient", "content": "三天", "round": 2, "step": "Turn 3-2"},
     ])
-    assert "＜第1回合(R1，Turn 2)助理提問＞：哪裡不舒服？" in text and "＜第1回合(R1，Turn 2)收到回應＞：頭痛" in text
-    assert "＜第2回合(R2，Turn 3)助理提問＞：多久了？" in text and "＜第2回合(R2，Turn 3)收到回應＞：三天" in text
+    assert "＜第1回合(R1，Turn 2-1)助理提問＞：哪裡不舒服？" in text and "＜第1回合(R1，Turn 2-1)收到回應＞：頭痛" in text
+    assert "＜第2回合(R2，Turn 3-2)助理提問＞：多久了？" in text and "＜第2回合(R2，Turn 3-2)收到回應＞：三天" in text
+
+
+def test_the_interview_keeps_the_step_that_started_it_across_a_save_and_a_restore():
+    from Information_Collection_Subagent import InformationCollectionSubagent
+    config = {"api_url": "http://fake.invalid/v1", "api_key": "k", "model_name": "m"}
+    started = InformationCollectionSubagent(config)
+    assert started.current_step == ""                       # exists from the start, not only after reset()
+    started.current_step = "Turn 3-2"
+    started.all_conversations.append({"role": "patient", "content": "x", "round": 1, "step": "Turn 3-2"})
+    reloaded = InformationCollectionSubagent(config)
+    reloaded.restore_state(started.export_state())          # a new assistant, as after a restart
+    assert reloaded.current_step == "Turn 3-2"
+    assert reloaded.all_conversations[0]["step"] == "Turn 3-2"
+    reloaded.reset()
+    assert reloaded.current_step == ""
+
+
+def test_the_main_agent_names_the_step_that_is_waiting_for_the_interview():
+    from Main_Agent import MainAgent
+    agent = MainAgent.__new__(MainAgent)
+    agent.turn_count = 5
+    agent._suspended = {"turn_num": 4, "sub_turn": 2}
+    assert agent.suspended_step_label == "Turn 4-2"
+
+
+def test_the_diff_says_which_interview_rounds_came_before_and_after_each_version():
+    dialogue = ("＜第1回合(R1，Turn 1-1)助理提問＞：哪裡不舒服？\n＜第1回合(R1，Turn 1-1)收到回應＞：頭痛\n"
+                "＜第2回合(R2，Turn 1-1)助理提問＞：多久？\n＜第2回合(R2，Turn 1-1)收到回應＞：三天\n"
+                "＜第3回合(R3，Turn 3-2)助理提問＞：血糖？\n＜第3回合(R3，Turn 3-2)收到回應＞：7.1\n")
+    history = SnapshotHistory()
+    history.push("a", "", source="init")
+    history.push("b", "", source="Turn 1-2 update_record")
+    history.push("c", "", source="人類修改", after_turn=1)
+    history.push("d", "", source="Turn 3-1 update_record")
+    text = build_record_diff_context(history.snapshots, history.current_index, interview_dialogue=dialogue)
+    # the agent's own version at Turn 1-2: both Turn 1-1 rounds are before it, the Turn 3-2 round after
+    assert "（版本 2 的先後：問診回合 R1~R2 早於這個版本；問診回合 R3 晚於這個版本。）" in text
+    # the manual edit after main turn 1: same split
+    assert "（版本 3 的先後：問診回合 R1~R2 早於這個版本；問診回合 R3 晚於這個版本。）" in text
+    # the doctor-instructed version at Turn 3-1 (agent-written): R3 started at Turn 3-2, so it is later
+    assert "（版本 4 的先後：問診回合 R1~R2 早於這個版本；問診回合 R3 晚於這個版本。）" in text
+    # a manual edit before any main turn: every round is after it
+    first = SnapshotHistory()
+    first.push("a", "", source="init")
+    first.push("b", "", source="人類修改", after_turn=0)
+    assert "（版本 2 的先後：問診回合 R1~R3 晚於這個版本。）" in build_record_diff_context(
+        first.snapshots, first.current_index, interview_dialogue=dialogue)
+    # without interview rounds there is nothing to say
+    assert "的先後" not in build_record_diff_context(history.snapshots, history.current_index)

@@ -94,12 +94,13 @@ def test_the_speaker_marks_and_the_gap_and_still_correcting_rules_are_explained_
 def test_the_three_reviewing_prompts_order_edits_against_interviews_and_files_by_main_turn():
     for name in ("record", "hallucination", "lc"):
         text = read(name)
-        assert "主輪編號" in text and "第 N 主輪之後" in text and "尚無任何主輪" in text, name
+        assert "步驟編號" in text and "第 N 主輪之後" in text and "尚無任何主輪" in text, name
         assert "必然晚於版本歷史中所有人工修改" in text, name
         assert "只依問診紀錄與檔案取得的先後判斷" not in text, name
 
 
-def test_the_reviewing_prompts_make_the_model_compare_the_source_turn_with_the_edit_turn():
+def test_the_reviewing_prompts_make_the_model_compare_the_source_step_with_the_edit_position():
     for name in ("record", "hallucination", "lc"):
         text = read(name)
-        assert "逐一檢查" in text and "T > N 才是修改之後" in text and "寫在你的 thinking 裡" in text, name
+        assert "版本 N 的先後" in text, name
+        assert "逐一檢查" in text and "X > N 者晚於這次修改" in text and "先比 X，X 相同再比 Y" in text and "寫在你的 thinking 裡" in text, name

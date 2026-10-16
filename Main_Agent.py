@@ -433,6 +433,12 @@ class MainAgent:
 
     # ── 狀態序列化（Session 持久化用）──
 
+    @property
+    def suspended_step_label(self) -> str:
+        """The step (`Turn X-Y`) that started the interview this agent is waiting for."""
+        suspended = self._suspended or {}
+        return f"Turn {suspended.get('turn_num', self.turn_count)}-{suspended.get('sub_turn', 0)}"
+
     def export_state(self) -> dict:
         """匯出 Agent 內部狀態，供存檔使用"""
         professor_memory = dict(self._professor_memory)
@@ -977,7 +983,8 @@ class MainAgent:
                         "at": current_at,
                         "source": "目前工作版本",
                     })
-            return build_record_diff_context(prompt_snapshots, has_recording=bool((voice_transcript or "").strip()))
+            return build_record_diff_context(prompt_snapshots, has_recording=bool((voice_transcript or "").strip()),
+                                              interview_dialogue=interview_dialogue)
 
         # 暴露 steps 引用供 UI polling
         self._live_steps = steps

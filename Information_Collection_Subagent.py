@@ -93,6 +93,8 @@ class InformationCollectionSubagent:
         self.all_conversations: list[dict] = []
         # 跨循環連續的問診回合計數器
         self.dialogue_round: int = 0
+        # 啟動這次問診的 Main Agent 步驟（"Turn X-Y"），由 UI 在啟動問診時設定；隨 session 保存與還原
+        self.current_step: str = ""
         # 當前循環的 turn 計數器（每次 start_collection 重置）
         self.turn_count: int = 0
         # 各輪行為摘要紀錄（供 context 使用）
@@ -203,7 +205,7 @@ class InformationCollectionSubagent:
             "role": "patient",
             "content": patient_input,
             "round": self.dialogue_round,
-            "turn": self.current_turn,
+            "step": self.current_step,
         }
         self.conversation.append(patient_msg)
         self.all_conversations.append(patient_msg)
@@ -281,7 +283,7 @@ class InformationCollectionSubagent:
         self.conversation = []
         self.all_conversations = []
         self.dialogue_round = 0
-        self.current_turn = 0                           # the Main Agent turn that started this interview (set by the UI)
+        self.current_step = ""
         self.turn_count = 0
         self.turn_history = []
         self.guidelines = ""
@@ -298,6 +300,7 @@ class InformationCollectionSubagent:
             "conversation": self.conversation,
             "all_conversations": self.all_conversations,
             "dialogue_round": self.dialogue_round,
+            "current_step": self.current_step,
             "turn_count": self.turn_count,
             "turn_history": self.turn_history,
             "guidelines": self.guidelines,
@@ -312,6 +315,7 @@ class InformationCollectionSubagent:
         self.conversation = state.get("conversation", state.get("all_conversations", []))
         self.all_conversations = state.get("all_conversations", [])
         self.dialogue_round = state.get("dialogue_round", 0)
+        self.current_step = state.get("current_step", "")
         self.turn_count = state.get("turn_count", 0)
         self.turn_history = state.get("turn_history", [])
         self.guidelines = state.get("guidelines", "")
@@ -605,7 +609,7 @@ ASSESSMENT & TREATMENT:
                 "role": "subagent",
                 "content": action_input,
                 "round": self.dialogue_round,
-                "turn": self.current_turn,
+                "step": self.current_step,
             }
             self.conversation.append(subagent_msg)
             self.all_conversations.append(subagent_msg)

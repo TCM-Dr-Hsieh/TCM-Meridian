@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import difflib
+import re
 from typing import Any
+
+_ROUND_STEP_RE = re.compile(r"＜第\d+回合\(R(\d+)，Turn (\d+)-(\d+)\)")
+_VERSION_STEP_RE = re.compile(r"Turn (\d+)-(\d+)")
 
 
 def _format_clock(seconds: float) -> str:
@@ -32,6 +36,50 @@ def _snapshot_label(index: int, snapshot: dict[str, Any], with_recording: bool =
     if with_recording:
         parts.append(_recording_note(snapshot))
     return f"版本 {index}（{', '.join(parts)}）"
+
+
+def _interview_steps(dialogue: str) -> dict[int, tuple[int, int]]:
+    """Interview round -> the Main Agent step (turn, step) that started it, from the round headers `＜第3回合(R3，Turn 2-3)…＞`."""
+    rounds: dict[int, tuple[int, int]] = {}
+    for match in _ROUND_STEP_RE.finditer(dialogue or ""):
+        rounds.setdefault(int(match.group(1)), (int(match.group(2)), int(match.group(3))))
+    return rounds
+
+
+def _position(snapshot: dict[str, Any]) -> tuple[int, int] | None:
+    """Where a version lies among the Main Agent's steps: an agent-written version is at its `Turn X-Y`; a physician's manual edit is
+    after main turn N has ended (later than every step of N, earlier than any step of N+1). None when it cannot be told."""
+    if snapshot.get("after_turn") is not None:
+        return int(snapshot["after_turn"]), 10 ** 9
+    match = _VERSION_STEP_RE.search(snapshot.get("source") or "")
+    return (int(match.group(1)), int(match.group(2))) if match else None
+
+
+def _round_list(numbers: list[int]) -> str:
+    """[1, 2, 3, 5] -> 'R1~R3、R5'."""
+    spans: list[list[int]] = []
+    for number in sorted(numbers):
+        if spans and number == spans[-1][1] + 1:
+            spans[-1][1] = number
+        else:
+            spans.append([number, number])
+    return "、".join(f"R{a}" if a == b else f"R{a}~R{b}" for a, b in spans)
+
+
+def _order_note(index: int, snapshot: dict[str, Any], rounds: dict[int, tuple[int, int]]) -> str:
+    """Which interview rounds came before and which after this version, worked out from the step numbers, so the reviewer reads
+    the order instead of comparing numbers itself."""
+    position = _position(snapshot)
+    if position is None or not rounds:
+        return ""
+    before = [number for number, step in rounds.items() if step < position]
+    after = [number for number, step in rounds.items() if step >= position]
+    parts = []
+    if before:
+        parts.append(f"問診回合 {_round_list(before)} 早於這個版本")
+    if after:
+        parts.append(f"問診回合 {_round_list(after)} 晚於這個版本")
+    return f"（版本 {index} 的先後：" + "；".join(parts) + "。）"
 
 
 def _edit_note(snapshot: dict[str, Any]) -> str:
@@ -76,6 +124,7 @@ def build_record_diff_context(
     current_index: int | None = None,
     *,
     has_recording: bool = False,
+    interview_dialogue: str = "",
 ) -> str:
     """Format snapshot history up to current_index as plain-text diffs for LLM prompts.
 
@@ -94,6 +143,7 @@ def build_record_diff_context(
         # The recording clock is shown only for a session that has a recording (some version carries it): a session without
         # one reads exactly as before. A version made before the recording began then says so.
         with_recording = has_recording or any(snap.get("rec_t") is not None for snap in active_snapshots)
+        rounds = _interview_steps(interview_dialogue)
         if len(active_snapshots) < 2:
             body = "（目前只有一個版本，尚無版本間 diff）"
         else:
@@ -130,6 +180,9 @@ def build_record_diff_context(
                     note = _edit_note(current)
                     if note:
                         parts.append(note)
+                    order = _order_note(idx + 1, current, rounds)
+                    if order:
+                        parts.append(order)
 
             body = "\n\n".join(parts) if parts else "（目前版本歷史中沒有內容差異）"
 

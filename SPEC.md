@@ -1180,7 +1180,7 @@ professor_*/parent_map.jsonl
 - `SessionBusyGuard(include_voice=True)` 在錄音進行中擋下切換／退出患者、切換日期、刪除 session、摘要並退出、修改患者資料；不擋 Agent 訊息與病歷編輯（`voice_busy()` 讀共用管理器）。
 - 每個主輪開始時取一份凍結的逐字稿快照（`VoiceManager.snapshot_text`），整輪沿用；問診結束後接續（`continue_after_interview`）取新的。逐字稿接在「完整問診對話紀錄」之後，注入 Main、Record、Hallucination、低信心標註、病歷檢查員；不注入問診助理與教授。
 - 版本快照帶 `rec_t`（錄音時鐘：這個 session 已錄下的音訊秒數，只增不減；`None` = 從未錄音）與 `rec_paused`；「病歷修改 diff 過程」的版本標示顯示 `@錄音 mm:ss`（無錄音的 session 完全不顯示，錄音前的版本標「尚未錄音」），讓 Agent 判斷修改與逐字稿的先後。
-- 先後以 Main Agent 的主輪編號（`turn_count`）為準：人工修改版本記錄 `after_turn`（修改當下已開始的主輪數，0 = 尚無主輪），diff 版本標示顯示「第 N 主輪之後」；Agent 寫入的版本標示 `Turn X-Y update_record`；問診回合標頭帶 `Turn T`（`＜第3回合(R3，Turn 2)…＞`，由啟動該次問診的主輪決定——問診一律由 Main Agent 啟動並在同一主輪續跑）；當輪讀取的檔案只存在於當輪，必然晚於版本歷史中所有人工修改（Agent 執行期間不可能有人工修改）。審查員比較 T 與 N 判斷來源在修改之前或之後。
+- 先後以 Main Agent 的主輪編號（`turn_count`）為準：人工修改版本記錄 `after_turn`（修改當下已開始的主輪數，0 = 尚無主輪），diff 版本標示顯示「第 N 主輪之後」；Agent 寫入的版本標示 `Turn X-Y update_record`；問診回合標頭帶啟動它的步驟 `Turn X-Y`（`＜第3回合(R3，Turn 2-3)…＞`——問診一律由 Main Agent 啟動並在同一主輪續跑；`current_step` 隨問診助理狀態保存與還原）；比較先後時先比主輪 X、再比步驟 Y；當輪讀取的檔案只存在於當輪，必然晚於版本歷史中所有人工修改（Agent 執行期間不可能有人工修改）。人工修改只有主輪層級的位置（N），來源的 X ≤ N 早於修改、X > N 晚於修改；同一主輪內以步驟 Y 比。「病歷修改 diff 過程」在每個改動的版本後面附一行「（版本 N 的先後：問診回合 R1~R2 早於這個版本；問診回合 R3 晚於這個版本。）」，由 `record_diff_context.py` 依回合標頭與版本位置（Agent 版本的 `Turn X-Y`、人工修改的 `after_turn`）算出，審查員直接採用，不必自己比編號；當輪讀取的檔案沒有步驟編號，只適用「必然晚於所有人工修改」。
 - 智能體互動行為新增第 8 欄 `voice_subagent`，記錄錄音開始／停止、錯誤與校稿呼叫。
 
 ### 17.4 來源標籤與 prompt

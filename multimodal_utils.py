@@ -26,8 +26,16 @@ def encode_image_to_base64(file_path: str) -> Optional[str]:
 
 
 def image_is_readable(file_path: str) -> bool:
-    """The picture can be handed to a model: the file is there and can be read (what `encode_image_to_base64` needs)."""
-    return bool(file_path) and os.path.isfile(file_path) and os.access(file_path, os.R_OK)
+    """The picture can be handed to a model: the file opens and gives bytes, as `encode_image_to_base64` will need. `os.access` is not
+    enough: a file another program holds open exclusively (Windows) passes it and still fails to open. The format is not checked."""
+    if not file_path or not os.path.isfile(file_path):
+        return False
+    try:
+        with open(file_path, "rb") as handle:
+            handle.read(1)
+        return True
+    except OSError:
+        return False
 
 
 def get_image_media_type(file_path: str) -> str:

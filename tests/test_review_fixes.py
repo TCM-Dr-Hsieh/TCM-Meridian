@@ -1,6 +1,7 @@
 """Findings of the prompt-contract review: a failed low-confidence scan is not a pass, a doubtful phrase can be named by occurrence, the
 reviewer is told the scope of the update, the writer can warn the Main Agent. The agents' model clients are fakes."""
 import json
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -473,3 +474,56 @@ def test_the_scan_is_not_told_a_missing_picture_is_attached(tmp_path):
     user = scan.client.calls[0]["messages"][1]["content"]
     assert isinstance(user, str)                                                         # no picture went out ...
     assert "讀取不到，沒有附上圖片本體" in user and "見多模態訊息" not in user               # ... and the text does not say one did
+
+
+def scan_message_for(tmp_path, entry):
+    """What the scan receives when the main agent hands it this one picture: the stash text built by the main agent, and the files."""
+    from Main_Agent import MainAgent
+    agent = MainAgent(CONFIG, CONFIG, None, CONFIG, CONFIG)
+    agent._loaded_files = [entry]
+    scan = lc(strength=1, rounds=1)
+    scan.client = fake_client(json.dumps({"intercept": "pass", "low_confidence_phrases": []}))
+    scan.execute(note_content=NOTE, loaded_files_block=agent._format_loaded_files_block(), image_files=agent._loaded_files)
+    return scan.client.calls[0]["messages"][1]["content"]
+
+
+def test_a_picture_that_is_there_but_cannot_be_opened_is_not_said_to_be_attached(tmp_path, monkeypatch):
+    import builtins
+    import multimodal_utils
+    entry = image_entry(tmp_path, "locked.png")
+    real_open = builtins.open
+
+    def refusing_open(file, *args, **kwargs):
+        if str(file) == entry["path"]:
+            raise PermissionError(13, "The process cannot access the file because it is being used by another process", entry["path"])
+        return real_open(file, *args, **kwargs)
+
+    monkeypatch.setattr(multimodal_utils, "open", refusing_open, raising=False)          # the module's own `open`: the check and the encoding
+    assert multimodal_utils.image_is_readable(entry["path"]) is False
+    user = scan_message_for(tmp_path, entry)
+    assert isinstance(user, str) and "讀取不到，沒有附上圖片本體" in user and "見多模態訊息" not in user
+    monkeypatch.undo()
+    user = scan_message_for(tmp_path, entry)                                             # the same file, once it opens
+    assert isinstance(user, list) and "見多模態訊息" in user[0]["text"] and user[1]["type"] == "image_url"
+
+
+@pytest.mark.skipif(__import__("sys").platform != "win32", reason="an exclusive open is a Windows lock")
+def test_a_picture_another_program_holds_open_exclusively_is_not_said_to_be_attached(tmp_path):
+    import ctypes
+    from ctypes import wintypes
+    import multimodal_utils
+    entry = image_entry(tmp_path, "held.png")
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateFileW.restype = wintypes.HANDLE
+    kernel32.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    generic_read, no_sharing, open_existing, normal = 0x80000000, 0, 3, 0x80
+    handle = kernel32.CreateFileW(entry["path"], generic_read, no_sharing, None, open_existing, normal, None)
+    assert handle not in (None, wintypes.HANDLE(-1).value), ctypes.get_last_error()
+    try:
+        assert os.access(entry["path"], os.R_OK) is True                                 # what the old check looked at: it says yes
+        assert multimodal_utils.image_is_readable(entry["path"]) is False
+        user = scan_message_for(tmp_path, entry)
+        assert isinstance(user, str) and "讀取不到，沒有附上圖片本體" in user and "見多模態訊息" not in user
+    finally:
+        kernel32.CloseHandle(handle)
+    assert multimodal_utils.image_is_readable(entry["path"]) is True                    # released: it can be attached again

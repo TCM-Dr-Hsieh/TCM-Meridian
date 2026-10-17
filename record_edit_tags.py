@@ -52,12 +52,27 @@ _TAG_RE = re.compile(rf"[ \t　]*\[{_TAG_BODY}\]")       # a tag together with t
 _BOLD_START_RE = re.compile(r"\*\*(?=([^*\n]+?)\*\*)")
 
 
+def _balanced(text: str) -> bool:
+    """Every full-width parenthesis of `text` pairs with another, in order."""
+    depth = 0
+    for char in text:
+        if char == "（":
+            depth += 1
+        elif char == "）":
+            depth -= 1
+            if depth < 0:
+                return False
+    return depth == 0
+
+
 def _reason_start(content: str) -> int | None:
     """Where the reason of a low-confidence mark begins in the text between its `**`: the full-width parenthesis that pairs with the
     last one. The LC agent writes `**phrase（reason）**` with the model's reason as it is, so the reason may hold parentheses of its own,
-    and the phrase may too (`**血壓（坐姿）130（來源（R2）不明）**`). None when it is not a mark: no closing parenthesis at the end, the
-    parentheses do not pair, or there is no phrase before them."""
-    if not content.endswith("）"):
+    and the phrase may too (`**血壓（坐姿）130（來源（R2）不明）**`). None when it is not a mark: no closing parenthesis at the end, no
+    phrase before the reason, or parentheses anywhere in it that do not pair. The last check matters: in a reason that lost a closing
+    parenthesis (`**夜間加重（僅家屬轉述（患者未確認）**`) the inner pair closes at the end, and taking it would turn the start of the
+    reason into record text; such a span is left as it is written."""
+    if not content.endswith("）") or not _balanced(content):
         return None
     depth = 0
     for index in range(len(content) - 1, -1, -1):

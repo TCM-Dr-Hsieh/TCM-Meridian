@@ -246,8 +246,22 @@ def test_a_reason_with_parentheses_of_its_own_is_still_one_mark():
 
 
 def test_parentheses_that_do_not_pair_are_not_a_mark():
-    for text in ("**夜間加重（原因）多）**", "**（只有原因）**", "**夜間加重（原因**"):
+    for text in ("**夜間加重（原因）多）**", "**（只有原因）**", "**夜間加重（原因**",
+                 "**夜間加重（僅家屬轉述（患者未確認）**",          # a reason that lost its closing parenthesis: the inner pair closes at the end
+                 "**血壓（坐姿130（來源不明）**"):                 # a phrase with a parenthesis that does not close
         assert editable_text(text, marks=True) == text, text
+        assert merge_human_edit(text, text, marks=True).text == text and merge_human_edit(text, text, marks=True).dropped_marks == ()
     # a bold span that is not a mark does not keep the next one from being found
     assert editable_text("**重點** 與 **口乾（未詢問（R1））**", marks=True) == "**重點** 與 口乾"
+
+
+def test_a_mark_the_scan_writes_from_a_broken_reason_is_kept_whole_and_a_sound_one_is_hidden():
+    from Low_Confidence_Subagent import _apply_replacements
+    note = "甲- 現病史：夜間加重。"
+    start = note.index("夜間加重")
+    broken = _apply_replacements(note, [(start, start + 4, ("僅家屬轉述（患者未確認",))])          # the model left a parenthesis open
+    assert broken == "甲- 現病史：**夜間加重（僅家屬轉述（患者未確認）**。"
+    assert editable_text(broken, marks=True) == broken                                         # kept as written, nothing of the reason becomes text
+    sound = _apply_replacements(note, [(start, start + 4, ("僅家屬轉述（患者未確認）",))])
+    assert editable_text(sound, marks=True) == note
 

@@ -131,6 +131,9 @@ def test_the_review_contract_fixes_are_in_the_prompts():
     assert "而且沒有出現在【本次更新的改動】" not in hallucination and "引用與數值都沒變的既有事實，先放行" in hallucination and "新增或改寫的，不放行" in hallucination
     assert "離改動處較遠的內容不會出現，代表這次沒動" in hallucination and "先看它有沒有出現在【本次更新的改動】的 `+` 行" in hallucination
     assert "### 重要：醫師限定的更新範圍決定遺漏判定的範圍" in read("lc") and "本輪病歷更新的登載方針" not in read("lc")
+    lc_text = read("lc")
+    assert "圖片本體會以多模態訊息附在這則訊息裡，你看得到" in lc_text and "**該圖片本輪已載入**" in lc_text and "**該圖片本輪沒有載入**" in lc_text
+    assert "核對描述有沒有超出圖片內容" in lc_text and "本 Subagent 不重新審查圖片本體" not in lc_text            # it looks at the picture now
     lc = read("lc")
     assert "你不會收到討論區內容" in lc and "`occurrence`（選填，整數）" in lc and "最近的欄位標題" in lc
     assert "不得提醒補回" in read("nr")

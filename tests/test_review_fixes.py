@@ -359,6 +359,7 @@ def test_the_files_read_this_turn_survive_a_save_and_restore_during_the_intervie
     second._call_llm = lambda *args, **kwargs: next(after)
     second.continue_after_interview("", "問診完成", "檢驗：HbA1c 7.3%[2026-10-16-Lab_data]", "")
     assert "HbA1c 7.3%" in seen["loaded_files_block"] and "2026-10-16-Lab_data.md" in seen["loaded_files_block"]
+    assert seen["image_files"] is second._loaded_files                                          # the main agent hands the files (and so the images) to the scan
     # the next main turn starts clean, as before
     again = iter([{"thinking": "t", "action": "reply", "action_input": "嗨", "next_step": ""}])
     second._call_llm = lambda *args, **kwargs: next(again)
@@ -403,3 +404,43 @@ def test_the_scope_is_read_from_the_physicians_words_in_the_chat_not_from_a_guid
     assert said in agent.client.calls[-1]["messages"][1]["content"] and "登載方針" not in agent.client.calls[-1]["messages"][1]["content"]
     from Main_Agent import MainAgent
     assert not hasattr(MainAgent.__new__(MainAgent), "_last_note_update_guidelines")
+
+
+# ------------------------------------------------------------------------------------------------ the low-confidence scan sees the images read this turn
+PNG_1X1 = bytes.fromhex("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c6360f8cfc0f00000040001ee8d6eb70000000049454e44ae426082")
+
+
+def image_entry(tmp_path, name="bp_photo.png"):
+    path = tmp_path / name
+    path.write_bytes(PNG_1X1)
+    return {"name": name, "type": "image", "path": str(path)}
+
+
+def test_the_scan_gets_the_images_read_this_turn_in_every_round(tmp_path):
+    agent = lc(strength=2, rounds=3)
+    agent.client = fake_client(json.dumps({"intercept": "pass", "low_confidence_phrases": []}))
+    agent.execute(note_content=NOTE, loaded_files_block="### 🖼️ bp_photo.png\n（圖片已載入，見多模態訊息）", image_files=[image_entry(tmp_path)])
+    assert len(agent.client.calls) == 2                                                     # two passes: both carry the picture
+    for call in agent.client.calls:
+        user = call["messages"][1]["content"]
+        assert isinstance(user, list) and user[0]["type"] == "text" and "bp_photo.png" in user[0]["text"]
+        assert [part["type"] for part in user[1:]] == ["image_url"] and user[1]["image_url"]["url"].startswith("data:image/png;base64,")
+
+
+def test_without_a_readable_image_the_message_stays_plain_text(tmp_path):
+    for files in (None, [], [{"name": "lab.md", "type": "text", "content": "HbA1c 7.3%"}],
+                  [{"name": "gone.png", "type": "image", "path": str(tmp_path / "gone.png")}]):         # nothing, a text file, an image that is no longer there
+        agent = lc(strength=1, rounds=1)
+        agent.client = fake_client(json.dumps({"intercept": "pass", "low_confidence_phrases": []}))
+        agent.execute(note_content=NOTE, image_files=files)
+        assert isinstance(agent.client.calls[0]["messages"][1]["content"], str), files
+
+
+def test_the_picture_goes_along_when_the_scan_asks_the_model_to_repair_its_answer(tmp_path):
+    mixed = {"intercept": "detected", "low_confidence_phrases": [{"original_phrase": "否認胸痛", "reason": "r"}, {"reason": "沒有片段"}]}
+    agent = lc(strength=1, rounds=1)
+    agent.client = fake_client(json.dumps(mixed, ensure_ascii=False))
+    agent.execute(note_content=NOTE, image_files=[image_entry(tmp_path)])
+    assert len(agent.client.calls) == 3                                                     # asked, asked to repair, asked again
+    for call in agent.client.calls:
+        assert isinstance(call["messages"][1]["content"], list) and call["messages"][1]["content"][1]["type"] == "image_url"

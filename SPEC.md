@@ -860,6 +860,8 @@ Role prefix 包含 case、formula、herb、acupuncture、diagnoses、treatment�
 
 `read_patient_file` 會把圖片檔以 path metadata 放入 `_loaded_files`，文字檔與歷史病歷 Markdown 以 UTF-8 content 放入 `_loaded_files`。當輪暫存檔案會在每個 main turn 開始時清空。
 
+**哪些 Agent 看得到當輪的圖片**：主 Agent、病歷登載助理（含審查退件後的重寫）、幻覺審查、低信心標註都會用 `inject_images_into_messages` 把當輪讀取的圖片附在 user 訊息裡（低信心標註每一輪掃描、包含請模型補齊格式的重試都附）；病歷檢查員與問診助理沒有。低信心標註原本不附圖片、把帶圖片來源標籤的描述一律視為高信心，現在核對描述有沒有超出圖片內容：圖片本輪已載入時，描述與圖片不符、或寫了圖上看不到的內容就標註（原因寫明圖片實際看得到什麼）；圖片本輪沒有載入時無法核對，不因此標註，照原規則視為前序流程已觀察。代價是每一輪掃描都帶圖，延遲與用量隨圖片大小上升。
+
 ## 12. Prompt contract
 
 ### 12.1 Main Agent prompt

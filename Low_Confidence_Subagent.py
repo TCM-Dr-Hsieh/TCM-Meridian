@@ -204,6 +204,7 @@ class LowConfidenceSubagent:
             conversation_history: 人類醫師與 AI 主治醫師的互動過程
             last_visit_block: 上次就診病歷
             history_summary: 歷史病歷摘要
+            image_files: 當輪讀取的檔案清單（其中的圖片）；圖片本體附在每一輪掃描的訊息裡，讓標註能核對描述有沒有超出圖片內容
             log_callback: 選用，日誌回呼
 
         Returns:
@@ -309,6 +310,7 @@ class LowConfidenceSubagent:
                 loaded_files_block=loaded_files_block,
                 behavior_context=behavior_context,
                 log_callback=log_callback,
+                image_files=image_files,
             )
 
             intercept = check_result.get("intercept", "pass")
@@ -488,6 +490,7 @@ class LowConfidenceSubagent:
         behavior_context: dict | None = None,
         log_callback: Optional[Callable[[str], None]] = None,
         voice_transcript: str = "",
+        image_files: list | None = None,
     ) -> dict[str, Any]:
         """
         執行一輪 LC 掃描。
@@ -561,11 +564,13 @@ class LowConfidenceSubagent:
                 content=user_prompt,
             )
 
-        # 呼叫 LLM（LC 不注入圖片：帶有圖片來源標籤的描述已視為高信心）
+        # 呼叫 LLM：當輪讀取的圖片附在 user 訊息裡（與主 Agent、登載助理、幻覺審查一致），標註才核對得了「描述有沒有超出圖片內容」
         _lc_messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
+        if image_files:
+            _lc_messages = inject_images_into_messages(_lc_messages, image_files)
 
         best: dict | None = None        # the latest answer with the right structure that still holds items nobody can place
         for attempt in range(self.MAX_JSON_RETRIES + 1):

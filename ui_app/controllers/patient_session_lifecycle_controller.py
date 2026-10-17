@@ -89,8 +89,9 @@ class PatientSessionLifecycleController:
 
     def restore_last_selection(self) -> bool:
         """For a page that has just been built (first visit, browser refresh, a connection lost for good): open the patient and visit
-        that were open. The persisted state (record versions, chat, interview, forum) comes back through the normal loading. Anything
-        that cannot be restored (the patient or visit is gone) leaves the page as an empty one. Never raises."""
+        that were open. A patient or visit that is gone leaves the page empty. A restore that fails half way (a file that cannot be read)
+        is undone: the page is empty again and says so, instead of showing a patient whose record is blank; the memory is kept so the
+        next load tries again. Never raises."""
         try:
             if self.app_state.get("selected_patient_folder"):
                 return False
@@ -104,6 +105,9 @@ class PatientSessionLifecycleController:
                 if date and date in (self.refs["session_select"].options or {}):
                     self.refs["session_select"].value = date
                     self.on_confirm_session()
+            except Exception as exc:
+                self._abandon_restore(exc)                  # still restoring: the cleanup must not wipe the memory
+                return False
             finally:
                 self._restoring = False
             self._remember()
@@ -114,6 +118,20 @@ class PatientSessionLifecycleController:
             self._restoring = False
             print(f"[restore_last_selection] {type(exc).__name__}: {exc}")
         return False
+
+    def _abandon_restore(self, exc: Exception):
+        """Put the page back to empty after a restore that failed half way, and tell the physician. Called while `_restoring` is still on,
+        so clearing the page does not clear the memory."""
+        print(f"[restore_last_selection] {type(exc).__name__}: {exc}")
+        try:
+            self.app_context.reset_patient_selection()
+            self.clear_patient_ui()
+        except Exception as cleanup:
+            print(f"[restore_last_selection] cleanup: {type(cleanup).__name__}: {cleanup}")
+        try:
+            self.refs["session_status"].text = f"⚠️ 自動還原上次開啟的看診失敗（{type(exc).__name__}），請手動選取患者與日期"
+        except Exception:
+            pass
 
     def _sync_busy_navigation(self):
         if self.busy_guard:

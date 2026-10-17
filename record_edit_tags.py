@@ -47,8 +47,44 @@ _TAG_BODY = (
 )
 _BARE_TAG_RE = re.compile(rf"\[{_TAG_BODY}\]")
 _TAG_RE = re.compile(rf"[ \t　]*\[{_TAG_BODY}\]")       # a tag together with the blanks in front of it
-# The low-confidence mark: the phrase may contain full-width parentheses of its own; the reason has none.
-_MARK_RE = re.compile(r"\*\*([^*\n]+?)（([^（）\n]*)）\*\*")
+# Every place a bold span could begin (`**`), with what lies up to the next `**` on the line. Overlapping on purpose: the closing
+# `**` of a bold span that is not a mark may open the mark that follows it.
+_BOLD_START_RE = re.compile(r"\*\*(?=([^*\n]+?)\*\*)")
+
+
+def _reason_start(content: str) -> int | None:
+    """Where the reason of a low-confidence mark begins in the text between its `**`: the full-width parenthesis that pairs with the
+    last one. The LC agent writes `**phrase（reason）**` with the model's reason as it is, so the reason may hold parentheses of its own,
+    and the phrase may too (`**血壓（坐姿）130（來源（R2）不明）**`). None when it is not a mark: no closing parenthesis at the end, the
+    parentheses do not pair, or there is no phrase before them."""
+    if not content.endswith("）"):
+        return None
+    depth = 0
+    for index in range(len(content) - 1, -1, -1):
+        if content[index] == "）":
+            depth += 1
+        elif content[index] == "（":
+            depth -= 1
+            if depth == 0:
+                return index if index > 0 else None
+    return None
+
+
+def _mark_spans(text: str) -> list[tuple[int, int, str, str]]:
+    """The low-confidence marks of `text` as (start, end, phrase, reason)."""
+    spans: list[tuple[int, int, str, str]] = []
+    taken_until = 0
+    for match in _BOLD_START_RE.finditer(text):
+        if match.start() < taken_until:
+            continue
+        content = match.group(1)
+        split = _reason_start(content)
+        if split is None:
+            continue
+        end = match.start() + len(content) + 4
+        spans.append((match.start(), end, content[:split], content[split + 1:-1]))
+        taken_until = end
+    return spans
 
 # A run of fewer than this many letters/digits that is left over after an edit is treated as chance (the physician typed
 # "大便" again while rewriting "大便1天2次，偏軟"); it does not keep a tag alive. A span with fewer letters than this needs all
@@ -97,11 +133,11 @@ def _events(text: str, marks: bool) -> list[tuple[int, int, str, object]]:
     tag_spans = [(m.start(), m.end(), m.group()) for m in _TAG_RE.finditer(text)]
     mark_spans: list[tuple[int, int, str, str]] = []
     if marks:
-        for m in _MARK_RE.finditer(text):
+        for mark_start, mark_end, phrase, reason in _mark_spans(text):
             # A mark with a source tag inside is not one the LC agent wrote (it never overlaps a tag): shown as it is.
-            if any(start < m.end() and end > m.start() for start, end, _ in tag_spans):
+            if any(start < mark_end and end > mark_start for start, end, _ in tag_spans):
                 continue
-            mark_spans.append((m.start(), m.end(), m.group(1), m.group(2)))
+            mark_spans.append((mark_start, mark_end, phrase, reason))
     return sorted(
         [(s, e, "tag", tok) for s, e, tok in tag_spans] + [(s, e, "mark", (phrase, reason)) for s, e, phrase, reason in mark_spans],
         key=lambda item: item[0],

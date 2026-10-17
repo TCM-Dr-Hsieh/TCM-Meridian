@@ -230,3 +230,24 @@ def test_a_bold_span_with_a_source_tag_inside_is_left_alone():
     note = "**患者有高血壓[語音#3]（原因）**"
     assert editable_text(note, marks=True) == "**患者有高血壓（原因）**"
     assert merge_human_edit(note, "**患者有高血壓（原因）**", marks=True).text == note
+
+
+def test_a_reason_with_parentheses_of_its_own_is_still_one_mark():
+    # the LC agent writes the model's reason as it is: it may hold full-width parentheses
+    old = "甲- 現病史：**夜間加重（僅家屬轉述（患者未確認））**[問診紀錄_患者R1]。咳嗽三天"
+    assert editable_text(old, marks=True) == "甲- 現病史：夜間加重。咳嗽三天"
+    assert merge_human_edit(old, "甲- 現病史：夜間加重。咳嗽三天", marks=True).text == old                  # an unchanged save
+    edited = merge_human_edit(old, "甲- 現病史：夜間不會加重。咳嗽三天", marks=True)
+    assert [(d.phrase, d.reason) for d in edited.dropped_marks] == [("夜間加重", "僅家屬轉述（患者未確認）")]
+    # parentheses in the phrase and in the reason together; the reason is the last pair that closes at the end
+    assert editable_text("**血壓（坐姿）130（來源（R2）不明）**", marks=True) == "血壓（坐姿）130"
+    # two marks in a row, the second with a nested reason
+    assert editable_text("**口乾（未詢問）****胸悶（家屬說（未確認））**", marks=True) == "口乾胸悶"
+
+
+def test_parentheses_that_do_not_pair_are_not_a_mark():
+    for text in ("**夜間加重（原因）多）**", "**（只有原因）**", "**夜間加重（原因**"):
+        assert editable_text(text, marks=True) == text, text
+    # a bold span that is not a mark does not keep the next one from being found
+    assert editable_text("**重點** 與 **口乾（未詢問（R1））**", marks=True) == "**重點** 與 口乾"
+

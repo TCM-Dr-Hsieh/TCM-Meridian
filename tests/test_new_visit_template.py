@@ -4,7 +4,7 @@ from pathlib import Path
 
 from ui_app.services.patient_service import PatientDataService
 
-OLD_NOTE = ("甲- 現病史：頭痛三天[問診紀錄_患者R1]，**夜間加重（只有家屬轉述）**[問診紀錄_家屬R2]；發燒[語音#2-3]\n"
+OLD_NOTE = ("甲- 現病史：頭痛三天[問診紀錄_患者R1]，**夜間加重（僅家屬轉述（患者未確認））**[問診紀錄_家屬R2]；發燒[語音#2-3]\n"
             "乙- 過去病史：高血壓十年[上次病歷] [人類醫師_手動修改]\n"
             "癸.2- 檢驗：HbA1c 7.3%[2026-10-01-Lab_data]；血壓 128/82 mmHg[人類醫師_T2]\n")
 OLD_AT = ("A: 外感風熱[Forum_D3]\n"

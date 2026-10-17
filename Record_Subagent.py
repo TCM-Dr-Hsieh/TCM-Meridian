@@ -12,6 +12,7 @@ from typing import Any, Callable, Optional
 
 from openai import OpenAI
 from multimodal_utils import inject_images_into_messages
+import model_json
 
 from agent_behavior_log import append_behavior_event
 from Hallucination_Subagent import HallucinationSubagent
@@ -435,7 +436,7 @@ class RecordSubagent:
             json_match = re.search(r"\{[\s\S]*\}", output)
             if json_match:
                 try:
-                    parsed = json.loads(json_match.group())
+                    parsed = model_json.loads(json_match.group())
                     break
                 except json.JSONDecodeError:
                     pass
@@ -760,7 +761,7 @@ class RecordSubagent:
                 json_match = re.search(r"\{[\s\S]*\}", rewrite_output)
                 if json_match:
                     try:
-                        rewrite_parsed = json.loads(json_match.group())
+                        rewrite_parsed = model_json.loads(json_match.group())
                         rewrite_note = str(rewrite_parsed.get("notes_for_main") or "").strip()
                         if rewrite_note:
                             notes_for_main = rewrite_note

@@ -10,6 +10,7 @@ import re
 from typing import Any, Callable, Optional
 
 from openai import OpenAI
+import model_json
 from agent_behavior_log import append_behavior_event
 
 # ════════════════════════════════════════════════════════════════
@@ -508,7 +509,7 @@ ASSESSMENT & TREATMENT:
             json_match = re.search(r"\{[\s\S]*\}", output)
             if json_match:
                 try:
-                    json.loads(json_match.group())
+                    model_json.loads(json_match.group())
                     break  # 解析成功，跳出重試迴圈
                 except json.JSONDecodeError:
                     pass
@@ -555,7 +556,7 @@ ASSESSMENT & TREATMENT:
         try:
             json_match = re.search(r"\{[\s\S]*\}", output)
             if json_match:
-                parsed = json.loads(json_match.group())
+                parsed = model_json.loads(json_match.group())
             else:
                 raise ValueError("找不到 JSON")
         except Exception as e:

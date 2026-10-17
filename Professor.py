@@ -25,6 +25,7 @@ from collections import Counter
 import numpy as np
 import requests
 from openai import OpenAI
+import model_json
 from multimodal_utils import IMAGE_EXTENSIONS, inject_images_into_messages
 from agent_behavior_log import append_behavior_event
 
@@ -1233,7 +1234,7 @@ reply_to_forum 是唯一正常結束方式；若尚未足以回答，請使用�
         if not match:
             return None
         try:
-            parsed = json.loads(match.group())
+            parsed = model_json.loads(match.group())
         except json.JSONDecodeError:
             return None
         if not isinstance(parsed, dict):

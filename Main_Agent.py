@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Any, Callable, Optional
 
 from openai import OpenAI
+import model_json
 from multimodal_utils import inject_images_into_messages
 from record_diff_context import build_record_diff_context
 from agent_behavior_log import append_behavior_event
@@ -1232,7 +1233,7 @@ class MainAgent:
                 # 解析 action_input
                 if isinstance(action_input, str):
                     try:
-                        action_input = json.loads(action_input)
+                        action_input = model_json.loads(action_input)
                     except json.JSONDecodeError:
                         action_input = {"target_field": "note", "guidelines": action_input}
 
@@ -1573,7 +1574,7 @@ class MainAgent:
                 input_parse_error = False
                 try:
                     if isinstance(action_input, str):
-                        prof_input = json.loads(action_input)
+                        prof_input = model_json.loads(action_input)
                     else:
                         prof_input = action_input
                     prof_id = prof_input.get("professor_id", "")
@@ -1911,7 +1912,7 @@ class MainAgent:
                     filenames = action_input
                 elif isinstance(action_input, str):
                     try:
-                        parsed_list = json.loads(action_input)
+                        parsed_list = model_json.loads(action_input)
                         if isinstance(parsed_list, list):
                             filenames = parsed_list
                         else:
@@ -2289,7 +2290,7 @@ class MainAgent:
             json_match = re.search(r"\{[\s\S]*\}", output)
             if json_match:
                 try:
-                    parsed = json.loads(json_match.group())
+                    parsed = model_json.loads(json_match.group())
                     return parsed
                 except json.JSONDecodeError:
                     pass

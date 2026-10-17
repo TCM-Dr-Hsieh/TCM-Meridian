@@ -11,6 +11,7 @@ import re
 from typing import Any, Callable, Optional
 
 from openai import OpenAI
+import model_json
 from multimodal_utils import inject_images_into_messages
 from agent_behavior_log import append_behavior_event
 
@@ -230,7 +231,7 @@ class HallucinationSubagent:
             json_match = re.search(r'\{[\s\S]*\}', output)
             if json_match:
                 try:
-                    result = json.loads(json_match.group())
+                    result = model_json.loads(json_match.group())
                     agree = str(result.get("agree", "")).strip().lower()
                     comment = result.get("comment", "")
                     thinking = result.get("thinking", "")

@@ -427,7 +427,7 @@ class ProfessorInstance:
                 return normalized
             if normalized.startswith("[") and normalized.endswith("]"):
                 try:
-                    decoded = json.loads(normalized)
+                    decoded = model_json.loads(normalized)
                 except (json.JSONDecodeError, TypeError):
                     return "none"
                 if isinstance(decoded, list):
@@ -1769,7 +1769,7 @@ reply_to_forum 是唯一正常結束方式；若尚未足以回答，請使用�
             if not text:
                 return []
             try:
-                parsed = json.loads(text)
+                parsed = model_json.loads(text)
                 if isinstance(parsed, list):
                     return [str(x).strip() for x in parsed if str(x).strip()]
             except Exception:

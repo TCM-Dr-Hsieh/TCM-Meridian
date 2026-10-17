@@ -110,3 +110,13 @@ def test_the_main_agent_reads_its_own_reply_and_its_action_inputs_with_raw_tabs(
         "success": True, "note": "乙", "at": "", "operations": [], "review_result": "agree", "review_rounds": 1}
     agent.process_message("更新", "甲", "", session_date="2026-10-17")
     assert seen["target_field"] == "note" and seen["guidelines"] == "更新" + TAB + "血壓"        # not the whole JSON text taken as the guideline
+
+
+def test_the_turn_history_keeps_the_updated_field_when_the_action_input_holds_raw_tabs():
+    agent = MainAgent.__new__(MainAgent)
+    inner = '{"target_field": "note",' + TAB + '"guidelines": "更新' + TAB + '血壓"}'
+    steps = [{"step_label": "Turn 1-1", "action": "update_record", "action_input": inner, "result": "成功執行 1 個操作", "thinking": "t", "next_step": ""}]
+    summary = agent._build_sub_steps_summary(steps)
+    assert summary[0]["action_summary"] == "update_record: 更新 note, 成功執行 1 個操作"          # not "更新 ?"
+    broken = [{"step_label": "Turn 1-2", "action": "update_record", "action_input": "沒有 JSON 的方針", "result": "r", "thinking": "", "next_step": ""}]
+    assert agent._build_sub_steps_summary(broken)[0]["action_summary"] == "update_record: 更新 ?, r"       # a plain-text guideline still reads as unknown

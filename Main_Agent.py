@@ -222,7 +222,7 @@ class MainAgent:
             stripped_selector = raw_selector.strip()
             if stripped_selector.startswith("[") and stripped_selector.endswith("]"):
                 try:
-                    decoded_selector = json.loads(stripped_selector)
+                    decoded_selector = model_json.loads(stripped_selector)
                 except (json.JSONDecodeError, TypeError):
                     decoded_selector = None
                 if isinstance(decoded_selector, list):
@@ -2040,7 +2040,7 @@ class MainAgent:
             target_f = ""
             if s["action"] == "update_record":
                 try:
-                    ai = json.loads(s["action_input"]) if isinstance(s["action_input"], str) else s["action_input"]
+                    ai = model_json.loads(s["action_input"]) if isinstance(s["action_input"], str) else s["action_input"]
                     target_f = ai.get("target_field", "?") if isinstance(ai, dict) else "?"
                 except Exception:
                     target_f = "?"

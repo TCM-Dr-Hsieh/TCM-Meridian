@@ -39,6 +39,7 @@ class PatientSessionLifecycleController:
         update_buttons: Callable[[], None],
         render_chat: Callable[[], None],
         busy_guard: Any | None = None,
+        last_selection: Any | None = None,
     ):
         self.ui = ui
         self.app_state = app_state
@@ -66,7 +67,53 @@ class PatientSessionLifecycleController:
         self.render_chat = render_chat
         self.agent_run_state = get_agent_run_state(app_state, ui_state)
         self.busy_guard = busy_guard
+        self.last_selection = last_selection              # LastSelectionStore: the patient and visit that were open, kept across page loads
+        self._restoring = False
         self.last_restore_result: dict[str, Any] = {}
+
+    # ------------------------------------------------------------------ coming back to the visit that was open
+    def _remember(self):
+        """Keep the patient and visit that are open now (nothing when none): a page opened again returns to them."""
+        if self.last_selection is None or self._restoring:
+            return
+        self.last_selection.save(self.app_state.get("selected_patient_folder"), self.app_state.get("selected_session_date"))
+
+    def _restore_target(self) -> tuple[str | None, str | None]:
+        """A running recording belongs to a visit, and a page without a patient can do little with it: that visit first (the busy lock
+        keeps the navigation closed while it runs). Otherwise the one that was open last."""
+        manager = self.app_state.get("_voice_manager")
+        session = getattr(manager, "session", None) if manager is not None and getattr(manager, "busy", False) else None
+        if session is not None and getattr(session, "folder", None) and getattr(session, "date", None):
+            return str(session.folder), str(session.date)
+        return self.last_selection.load() if self.last_selection is not None else (None, None)
+
+    def restore_last_selection(self) -> bool:
+        """For a page that has just been built (first visit, browser refresh, a connection lost for good): open the patient and visit
+        that were open. The persisted state (record versions, chat, interview, forum) comes back through the normal loading. Anything
+        that cannot be restored (the patient or visit is gone) leaves the page as an empty one. Never raises."""
+        try:
+            if self.app_state.get("selected_patient_folder"):
+                return False
+            folder, date = self._restore_target()
+            if not folder or folder not in (self.refs["patient_select"].options or {}):
+                return False
+            self._restoring = True
+            try:
+                self.refs["patient_select"].value = folder
+                self.on_confirm_patient()
+                if date and date in (self.refs["session_select"].options or {}):
+                    self.refs["session_select"].value = date
+                    self.on_confirm_session()
+            finally:
+                self._restoring = False
+            self._remember()
+            if self.app_state.get("selected_patient_folder"):
+                self.refs["session_status"].text = "↩️ 已回到上次開啟的" + ("患者與就診日期" if self.app_state.get("selected_session_date") else "患者")
+                return True
+        except Exception as exc:                      # a failing restore must never keep the page from opening
+            self._restoring = False
+            print(f"[restore_last_selection] {type(exc).__name__}: {exc}")
+        return False
 
     def _sync_busy_navigation(self):
         if self.busy_guard:
@@ -176,6 +223,7 @@ class PatientSessionLifecycleController:
         if behavior_render:
             behavior_render()
         self._sync_busy_navigation()
+        self._remember()
 
     def refresh_linked_tabs(self, include_forum: bool = True):
         if self.app_state.get("_refresh_image_list"):
@@ -199,6 +247,8 @@ class PatientSessionLifecycleController:
 
     def _reject_if_busy(self) -> bool:
         """忙碌中禁止切換、刪除或寫入 session-sensitive 狀態。回傳 True 表示已拒絕。"""
+        if self._restoring:
+            return False
         if self.busy_guard:
             return self.busy_guard.reject_if_busy(status_label=self.refs["session_status"], include_voice=True)
         return False
@@ -347,6 +397,7 @@ class PatientSessionLifecycleController:
         behavior_render = self.app_state.get("render_agent_behavior")
         if behavior_render:
             behavior_render()
+        self._remember()
 
     def on_confirm_patient(self):
         if self._reject_if_busy():
@@ -385,6 +436,7 @@ class PatientSessionLifecycleController:
         self.update_buttons()
         self.refresh_linked_tabs()
         self.sync_global_settings_save_state()
+        self._remember()
 
     def clear_patient_ui(self):
         self.refs["patient_select"].value = None
@@ -414,6 +466,7 @@ class PatientSessionLifecycleController:
         if clear_interview_fn:
             clear_interview_fn()
         self.sync_global_settings_save_state()
+        self._remember()
 
     def update_patient_display(self):
         fp = self.app_state.get("selected_patient_folder")

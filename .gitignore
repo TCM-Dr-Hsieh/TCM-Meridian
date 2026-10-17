@@ -54,3 +54,6 @@ professor_04/
 #
 # 目前附帶 professor_01（自編安全清單）、professor_02（醫宗金鑑，公眾領域古籍）
 # 只發布 doc/ 原始知識庫 + prompt + Description.txt；向量索引不發布，由使用者重建。
+
+# ── 上次開啟的患者與就診日期（程式自動寫入）──
+last_session.json

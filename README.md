@@ -547,6 +547,10 @@ professor_*/parent_map.jsonl
 - 新增主 Agent action 時，需同步更新 `prompt_main_agent.txt`、`Main_Agent.py`、UI persistence、README 與 SPEC。
 - 會改動病歷的流程應保留來源歸因、寫入前審查與寫入後低信心標註。
 
+### 重新整理與連線中斷
+
+遠端（Cloudflare 等）操作時連線可能中斷：伺服器替頁面保留連線 60 秒（`TCM_RECONNECT_SECONDS` 可調），短暫中斷不會重載頁面；真的重新整理或中斷太久後，頁面會自動回到上次開啟的患者與就診日期（記在 `last_session.json`，整個程式一份）。AI 回合、問診、尚未完成的病歷修改，以及正在擷取遠端麥克風的分頁，在關閉或重新整理前會跳出確認。本機麥克風的錄音由伺服器負責，重新整理不會中斷。
+
 ## 測試狀態
 
 `tests/` 有語音功能（對齊、逐字稿管線、說話者標記、遠端麥克風、回聽、續錄）與病歷標籤編輯、prompt 格式的 pytest，只用於開發：`install.cmd -Dev`（或 `pip install -r requirements-dev.txt -c constraints.txt`）後執行 `.venv\Scripts\python.exe -m pytest tests`，不需要 GPU 或模型。其餘功能的手動驗收清單請見 `SPEC.md`。

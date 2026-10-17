@@ -51,6 +51,7 @@ def build_medical_main_tab(
     record_snapshot_store: Any,
     get_last_visit_content: Callable[[str, str], str],
     generate_history_summary: Callable[[str, str], str],
+    last_selection: Any | None = None,
 ):
     history = SnapshotHistory()
     app_state["history"] = history
@@ -216,6 +217,7 @@ def build_medical_main_tab(
         update_buttons=_update_buttons,
         render_chat=lambda: _render_chat(),
         busy_guard=busy_guard,
+        last_selection=last_selection,
     )
     btn_save_remark.on_click(patient_session_controller.on_save_remark)
 
@@ -456,3 +458,4 @@ def build_medical_main_tab(
     btn_expand_chat.on_click(on_expand_chat)
     _refresh_patient_list()
     _update_buttons()
+    patient_session_controller.restore_last_selection()      # a reloaded page returns to the visit that was open

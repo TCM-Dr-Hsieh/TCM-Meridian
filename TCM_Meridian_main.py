@@ -37,6 +37,9 @@ from ui_app.controllers.voice_controller import VoiceController
 from ui_app.services.config_service import load_json_config, save_json_config
 from ui_app.services.app_services import create_app_services
 from ui_app.shell import TabSpec, build_header, build_tab_shell
+from ui_app.leave_warning import register_leave_warning
+from ui_app.log_filters import install_dropped_page_filter
+from ui_app.services.last_selection import LastSelectionStore
 from ui_app.voice_assets import register_voice_web
 from voice.config import VoiceSettings
 from voice.replay import register_replay_routes
@@ -53,6 +56,11 @@ os.makedirs(DATA_ROOT, exist_ok=True)
 
 TODAY = datetime.now().strftime("%Y-%m-%d")
 RECORD_TEMPLATE_PATH = os.path.join(CURRENT_DIR, "Record_Template.txt")
+# 上次開啟的患者與就診日期（整個程式一份）：瀏覽器重新整理、連線中斷太久而重載時，頁面回到那個看診
+last_selection_store = LastSelectionStore(os.path.join(CURRENT_DIR, "last_session.json"))
+# 連線斷掉後伺服器替頁面保留多久（NiceGUI 預設 3 秒，經 Cloudflare 等通道容易超過而整頁重載、狀態歸零）。TCM_RECONNECT_SECONDS 可調。
+RECONNECT_SECONDS = float(os.environ.get("TCM_RECONNECT_SECONDS", "60") or 60)
+install_dropped_page_filter()      # 從未連線的頁面（探測、爬蟲）逾時刪除時，NiceGUI 計時器會各報一次無害的 traceback；只濾掉這一種
 
 # ════════════════════════════════════════════════════════════════
 # 全域應用狀態 (跨分頁共享)
@@ -391,6 +399,7 @@ def build_ui():
     build_header(ui, TODAY)
     # 語音視窗放在分頁之外，切換頁面時不會消失；左欄的「語音功能」按鈕在主介面分頁建立時綁定。
     VoiceController(ui=ui, app_state=app_state, manager=voice_manager).build()
+    register_leave_warning(ui, app_state)
     # 修改病歷時的「參考版本」浮動視窗（顯示帶來源標籤的原文）同理放在分頁之外
     RecordReferencePanel(ui=ui, app_state=app_state).build()
     build_tab_shell(ui, app_state, _tab_specs())
@@ -432,6 +441,7 @@ def _build_medical_main_tab():
         record_snapshot_store=record_snapshot_store,
         get_last_visit_content=get_last_visit_content,
         generate_history_summary=generate_history_summary,
+        last_selection=last_selection_store,
     )
 
 
@@ -449,6 +459,7 @@ def run_app():
         port=int(os.environ.get("TCM_PORT", "8080")),
         reload=reload_enabled,
         favicon="🌿",
+        reconnect_timeout=RECONNECT_SECONDS,
     )
 
 

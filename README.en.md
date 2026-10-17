@@ -542,6 +542,10 @@ Patient demographic data sent into LLM prompts is de-identified first: names kee
 - When adding a new Main Agent action, update `prompt_main_agent.txt`, `Main_Agent.py`, UI persistence, README, and SPEC together.
 - Any workflow that modifies records should preserve source attribution, pre-write review, and post-write low-confidence annotation.
 
+### Refreshing and lost connections
+
+Over a tunnel (Cloudflare and the like) the connection can drop. The server keeps a page's connection for 60 seconds (`TCM_RECONNECT_SECONDS` changes it), so a short outage does not reload the page; after a real refresh, or an outage that lasted longer, the page returns to the patient and visit that were open (kept in `last_session.json`, one for the whole program). The browser asks before a page is closed or refreshed while an AI turn, an interview, an unfinished record edit or a remote-microphone capture in that tab is running. A recording from the computer's own microphone belongs to the server and is not interrupted by a refresh.
+
 ## Test Status
 
 `tests/` holds pytest tests for the voice feature (alignment, transcript pipeline, speaker marking, remote microphone, replay, continued recordings), the record tag editing and the prompt format. They are for development only: run `install.cmd -Dev` (or `pip install -r requirements-dev.txt -c constraints.txt`), then `.venv\Scripts\python.exe -m pytest tests`; no GPU or models needed. See `SPEC.md` for the manual acceptance checklist of the rest.

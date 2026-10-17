@@ -389,7 +389,7 @@ patient_data/<patient_id>_<birthday>_<name>/
 
 `Picture_Row/` stores patient images, and `Medical_information/` stores text reports and medical information. The patient root folder stores NOTE and ASSESSMENT & TREATMENT Markdown files for each visit date. The Main Agent can list and read these files through actions. Historical record lists show `note_summary` or `assessment_treatment_summary`; if "summarize and exit" has not been run, the first 50 characters of the file are used as a fallback summary.
 
-The date selector in the main interface shows NOTE summaries, such as `2026-06-11 (headache, sore throat)`, to help identify sessions. The template selector remains a pure date list.
+The date selector in the main interface shows NOTE summaries, such as `2026-06-11 (headache, sore throat)`, to help identify sessions. The template selector remains a pure date list. A new visit started from an earlier record gets its plain text only: the source tags (such as `[語音#12]`, `[問診紀錄_患者R2]`) and the NOTE's low-confidence marks are not carried over, because they point to that visit's own sources.
 
 "Summarize and exit" exits only the currently loaded visit date, not the patient. "Delete session" acts on the date selected in the dropdown and does not require that date to be loaded. Busy-state locks prevent switching patients/sessions, creating/deleting sessions, exiting patients, or summarizing while the Main Agent is running, interview flow is active, or the record editor is still in edit mode. If the summary model is not configured or the call fails, the system falls back to the first 50 characters of the original content.
 

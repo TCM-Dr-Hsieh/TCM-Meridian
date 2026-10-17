@@ -138,7 +138,7 @@ Runtime prompts
 版面：
 
 - 左欄：患者選擇、session 選擇、新增 session、摘要並退出 session、患者基本資料與備註。基本資料保留完整生日，並依系統當日以括號附加年齡，格式為 `YYYY-MM-DD (X歲Y月)`；生日空白、格式無效或晚於系統當日時不附加年齡。
-- Session 選擇下拉顯示 `YYYY-MM-DD（NOTE 摘要）`，但 value 維持 `YYYY-MM-DD`；新增 session 的「選擇模板」下拉維持純日期，不顯示摘要。
+- Session 選擇下拉顯示 `YYYY-MM-DD（NOTE 摘要）`，但 value 維持 `YYYY-MM-DD`；新增 session 的「選擇模板」下拉維持純日期，不顯示摘要。以舊病歷為模板新增 session 時，複製的是**純文字**（`patient_service._copy_record_as_plain_text`，與修改模式顯示的文字同一套規則 `record_edit_tags.editable_text`）：NOTE 去掉來源標籤與低信心標註（保留片段文字、去掉括號原因），A&T 只去來源標籤、保留自己的粗體註記；舊病歷的標籤指向那次就診的逐字稿、問診、主輪與檔案，放進新的就診會指向不存在的來源，或被誤當成本次同編號的來源。原本的舊病歷不受影響。
 - 中欄：NOTE 與 A&T 瀏覽、diff、修改模式、undo、redo。
 - 右欄：主 Agent 對話、「對話放大」、常用提示詞、訊息輸入、送出、中斷、狀態與即時步驟。「對話放大」按鈕位於對話紀錄下方；「常用提示詞」按鈕位於訊息輸入區上方。
 

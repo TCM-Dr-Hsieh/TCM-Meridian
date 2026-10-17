@@ -6,7 +6,22 @@ import re
 import shutil
 from datetime import datetime
 
+from record_edit_tags import editable_text
 from ui_app.services.file_io import atomic_write_json, atomic_write_text
+
+
+def _copy_record_as_plain_text(source: str, target: str, *, marks: bool) -> None:
+    """Start a new visit from an earlier visit's record, as plain text. The source tags of that record (`[語音#12]`, `[問診紀錄_患者R2]`,
+    `[人類醫師_T3]`, file names) point to that visit's transcript, interview, turns and files, and its low-confidence marks to that visit's
+    evidence: in the new visit they would name sources that are not there, or the new visit's own sources by the same numbers. They are
+    left out, the words stay -- the same plain text the record editor shows. `marks` drops the low-confidence marks as well (the NOTE);
+    the A&T keeps its bold notes, which are not marks."""
+    if not os.path.isfile(source):
+        atomic_write_text(target, "")
+        return
+    with open(source, "r", encoding="utf-8") as handle:
+        text = handle.read()
+    atomic_write_text(target, editable_text(text, marks=marks))
 
 
 class PatientDataService:
@@ -239,14 +254,8 @@ class PatientDataService:
             tmpl_session = info["sessions"][template_date]
             tmpl_note = os.path.join(folder_path, tmpl_session.get("note_file", ""))
             tmpl_at = os.path.join(folder_path, tmpl_session.get("assessment_treatment_file", ""))
-            if os.path.isfile(tmpl_note):
-                shutil.copy2(tmpl_note, note_path)
-            else:
-                atomic_write_text(note_path, "")
-            if os.path.isfile(tmpl_at):
-                shutil.copy2(tmpl_at, at_path)
-            else:
-                atomic_write_text(at_path, "")
+            _copy_record_as_plain_text(tmpl_note, note_path, marks=True)
+            _copy_record_as_plain_text(tmpl_at, at_path, marks=False)
         else:
             atomic_write_text(note_path, "")
             atomic_write_text(at_path, "")

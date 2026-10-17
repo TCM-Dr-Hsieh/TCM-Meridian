@@ -2239,10 +2239,7 @@ class MainAgent:
         if self.rec_clock is None:
             return {}
         try:
-            position = self.rec_clock()
-            seconds, paused = position[0], position[1]
-            hidden = [int(index) for index in getattr(position, "hidden", ()) or ()]
-            last = getattr(position, "last", None)
+            seconds, paused = self.rec_clock()
         except Exception:
             return {}
         if seconds is None:
@@ -2250,10 +2247,6 @@ class MainAgent:
         fields: dict[str, Any] = {"rec_t": round(float(seconds), 2)}
         if paused:
             fields["rec_paused"] = True
-        if hidden:
-            fields["rec_hidden"] = hidden          # segments before rec_t that were not on the screen yet: they came after this version
-        if isinstance(last, int) and not isinstance(last, bool):
-            fields["rec_seen"] = last              # the latest segment on the screen: what the order of the transcript lines is told by
         return fields
 
     def _call_llm(

@@ -437,7 +437,7 @@ def test_the_main_agent_hands_the_writer_a_diff_that_says_which_transcript_lines
     agent.record_subagent.execute = writer
     transcript = "【診間對話逐字稿 · 截至 01:00】\n語音#1 00:05–00:20 頭痛三天\n語音#2 00:20–00:35 家屬說 HbA1c 7.1%\n語音#3 00:45–01:00 好"
     snapshots = [{"note": "甲", "at": "", "source": "Turn 1-1 update_record", "rec_t": 10.0},
-                 {"note": "甲2", "at": "", "source": "人類修改", "rec_t": 40.0, "rec_hidden": [2], "after_turn": 1}]
+                 {"note": "甲2", "at": "", "source": "人類修改", "rec_t": 40.0, "after_turn": 1}]
     agent.process_message("更新", "甲2", "", record_history_snapshots=snapshots, record_history_current_index=1,
                           voice_transcript=transcript, session_date="2026-10-17")
-    assert "（版本 2 的逐字稿先後：逐字稿 #1 在畫面上，早於這個版本；逐字稿 #2~#3 晚於這個版本。）" in seen["record_diff_context"]
+    assert "（版本 2 的逐字稿先後（以時間粗略估計）：逐字稿 #1~#2 約早於這個版本；逐字稿 #3 晚於這個版本。）" in seen["record_diff_context"]

@@ -80,8 +80,6 @@ class MainAgentResultProcessor:
                 dt,
                 rec_t=snapshot.get("rec_t"),
                 rec_paused=bool(snapshot.get("rec_paused")),
-                rec_hidden=snapshot.get("rec_hidden"),
-                rec_seen=snapshot.get("rec_seen"),
             ):
                 pushed += 1
 
@@ -90,14 +88,10 @@ class MainAgentResultProcessor:
         snapshots = result.get("record_snapshots") or []
         last = snapshots[-1] if snapshots and isinstance(snapshots[-1], dict) else {}
         if last.get("rec_t") is not None:
-            rec_t, rec_paused, rec_hidden = last["rec_t"], bool(last.get("rec_paused")), last.get("rec_hidden")
-            rec_seen = last.get("rec_seen")
+            rec_t, rec_paused = last["rec_t"], bool(last.get("rec_paused"))
         else:
-            position = self._recording_position(fp, dt)
-            rec_t, rec_paused = position[0], position[1]
-            rec_hidden, rec_seen = getattr(position, "hidden", None), getattr(position, "last", None)
-        if self._push_record_snapshot(result["note"], result["at"], final_source, fp, dt,
-                                      rec_t=rec_t, rec_paused=rec_paused, rec_hidden=rec_hidden, rec_seen=rec_seen):
+            rec_t, rec_paused = self._recording_position(fp, dt)
+        if self._push_record_snapshot(result["note"], result["at"], final_source, fp, dt, rec_t=rec_t, rec_paused=rec_paused):
             pushed += 1
 
         if pushed:
@@ -120,15 +114,12 @@ class MainAgentResultProcessor:
         *,
         rec_t: float | None = None,
         rec_paused: bool = False,
-        rec_hidden: list[int] | None = None,
-        rec_seen: int | None = None,
     ) -> bool:
         current = self.history.get_current()
         if current and current.get("note", "") == note and current.get("at", "") == at:
             return False
         before_index = self.history.current_index
-        truncated = self.history.push(note, at, source=source, rec_t=rec_t, rec_paused=rec_paused, rec_hidden=rec_hidden,
-                                     rec_seen=rec_seen)
+        truncated = self.history.push(note, at, source=source, rec_t=rec_t, rec_paused=rec_paused)
         if truncated:
             self.record_snapshot_store.append_audit_event(
                 fp,

@@ -24,12 +24,7 @@ def _recording_note(snapshot: dict[str, Any]) -> str:
     if float(rec_t) <= 0:
         return "@錄音 00:00，當時還沒有任何逐字稿" + ("，錄音暫停中" if snapshot.get("rec_paused") else "")
     paused = "，錄音暫停中" if snapshot.get("rec_paused") else ""
-    hidden = [int(index) for index in snapshot.get("rec_hidden") or [] if isinstance(index, int) and not isinstance(index, bool)]
-    later = ""
-    if hidden:
-        shown = "、".join(f"#{index}" for index in hidden[:12]) + (f" 等共 {len(hidden)} 段" if len(hidden) > 12 else "")
-        later = f"，逐字稿 {shown} 當時還沒出現在畫面上（之後才出現，算修改之後）"
-    return f"@錄音 {_format_clock(float(rec_t))}{later}{paused}"
+    return f"@錄音 {_format_clock(float(rec_t))}{paused}"
 
 
 def _snapshot_label(index: int, snapshot: dict[str, Any], with_recording: bool = False) -> str:
@@ -87,30 +82,24 @@ def _transcript_ends(transcript: str) -> dict[int, int]:
 
 
 def _transcript_note(index: int, snapshot: dict[str, Any], ends: dict[int, int]) -> str:
-    """Which transcript lines were on the screen when this version was made and which came after, so the reviewer reads the order instead
-    of comparing mm:ss itself. Worked out from the number of the latest segment then on the screen (`rec_seen`; numbers only grow) and the
-    segments the version names as not wholly there. Without the number, by whole seconds -- the only precision the lines show -- and a line
-    that ends in the same second as the clock cannot be placed, so it is taken as later (it is not declared old on a guess)."""
+    """Which transcript lines end at or before the point the transcript had reached when this version was made, and which after it, so the
+    reviewer reads the order instead of comparing mm:ss itself. A rough boundary by whole seconds (the precision the lines show); it does
+    not say that anyone read a line."""
     if not ends:
         return ""
     rec_t = snapshot.get("rec_t")
     if rec_t is None:
         return f"（版本 {index} 的逐字稿先後：全部逐字稿都晚於這個版本，它是錄音開始前做的。）"
-    hidden = {int(item) for item in snapshot.get("rec_hidden") or [] if isinstance(item, int) and not isinstance(item, bool)}
-    seen = snapshot.get("rec_seen")
-    if isinstance(seen, int) and not isinstance(seen, bool):
-        before = [number for number in ends if number <= seen and number not in hidden]
-    else:
-        limit = int(float(rec_t))
-        before = [number for number, end in ends.items() if end < limit and number not in hidden]
+    limit = int(float(rec_t))
+    before = [number for number, end in ends.items() if end <= limit]
     placed = set(before)
     after = [number for number in ends if number not in placed]
     parts = []
     if before:
-        parts.append(f"逐字稿 {_round_list(before, '#')} 在畫面上，早於這個版本")
+        parts.append(f"逐字稿 {_round_list(before, '#')} 約早於這個版本")
     if after:
         parts.append(f"逐字稿 {_round_list(after, '#')} 晚於這個版本")
-    return f"（版本 {index} 的逐字稿先後：" + "；".join(parts) + "。）"
+    return f"（版本 {index} 的逐字稿先後（以時間粗略估計）：" + "；".join(parts) + "。）"
 
 
 def _order_note(index: int, snapshot: dict[str, Any], rounds: dict[int, tuple[int, int]]) -> str:

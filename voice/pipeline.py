@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import asdict, dataclass, field, fields
-from typing import Callable, NamedTuple
+from typing import Callable
 
 from .config import ASRSettings
 from .textutil import format_clock, join_texts, script
@@ -70,13 +70,6 @@ class TranscriptSnapshot:
     unlocked: list[int]
     pending: int
     marked: bool = False   # the lines carry speaker marks
-
-
-class Reach(NamedTuple):
-    """What the transcript held at one moment, as a record version keeps it."""
-    seconds: float        # where it reaches: the end of its latest segment that has a line
-    hidden: list[int]     # segments inside that reach not wholly in it, that may still show more (see `reach_and_hidden`)
-    last: int             # the number of its latest segment that has a line (0 = none): numbers only grow, so it orders exactly
 
 
 def gap_marker(start: float, end: float) -> str:
@@ -149,40 +142,14 @@ class TranscriptPipeline:
         return {s.index: self.line(s, marked) for s in self.segments if s.visible}
 
     def _reach(self, written: dict[int, str]) -> float:
-        """The end of the latest segment that has a line. A segment still without text (its window held only the overlap that was
-        transcribed before, or the recognizer returned nothing) or with background voices only is not in what the agents are given, and
-        it may still get a line later (the rolling correction fills it, a background voice is judged to be a foreground one): lines it
-        gets then must count as appearing after the point reached now."""
+        """The end of the latest segment that has a line in what is handed out: where the text stops. It is a rough boundary, nothing more.
+        The text itself, the speaker marks and the background judgement are all guesses that can be revised, and a segment in the middle
+        that is filled or re-judged later still lies before this point; that is accepted. The physician reads the record at the end."""
         return max((s.end for s in self.segments if written.get(s.index)), default=0.0)
-
-    def reach_and_hidden(self) -> Reach:
-        """Where the transcript reaches, its latest segment, and the segments inside that reach that are not wholly in it now but may still
-        show more. The reach alone cannot say that a segment in the middle is missing: a background voice judged to be a foreground one
-        later, or a segment the rolling correction has not filled yet, ends before the reach and still appears after it. A segment of which
-        only a part was left out as background voices is listed too: its other words are on the screen, but the words that may come back
-        are not, and the whole segment is treated as later (the conservative side). An empty segment that is locked is silence for good
-        and is not listed."""
-        marked = self._marked()
-        written = self._written(marked)
-        reach = self._reach(written)
-        pending = set(self.unlocked_indexes())
-        hidden = []
-        for s in self.segments:
-            if s.kind != 'speech' or s.end > reach:
-                continue
-            line = written.get(s.index)
-            if not line:
-                if s.visible or s.index in pending:
-                    hidden.append(s.index)
-            elif line != self.line(s, marked, keep_background=True):        # some of its words were filtered out as background voices
-                hidden.append(s.index)
-        last = max((s.index for s in self.segments if written.get(s.index)), default=0)
-        return Reach(reach, hidden, last)
 
     @property
     def upto(self) -> float:
-        """Where the transcript reaches (the `截至 mm:ss` of a snapshot). The recording clock of a record version is this, so what the
-        clock says was on the screen is what a snapshot taken then would hold."""
+        """Where the transcript reaches (the `截至 mm:ss` of a snapshot): the boundary a record version is stamped with."""
         return self._reach(self._written(self._marked()))
 
     def snapshot(self) -> TranscriptSnapshot:

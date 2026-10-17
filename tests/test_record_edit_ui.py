@@ -408,58 +408,21 @@ def test_the_last_version_of_an_agent_turn_sits_where_the_turns_other_versions_d
     assert history.snapshots[-1]["rec_t"] == 99.0
 
 
-def test_a_version_keeps_the_segments_that_were_not_on_the_screen_and_the_diff_says_so():
-    from voice.service import Position
-    from Main_Agent import MainAgent
-    agent = MainAgent.__new__(MainAgent)
-    agent.rec_clock = lambda: Position(9.0, False, (2,))
-    assert agent._rec_fields() == {"rec_t": 9.0, "rec_hidden": [2]}
-    agent.rec_clock = lambda: (9.0, True)                                      # a plain pair, as before
-    assert agent._rec_fields() == {"rec_t": 9.0, "rec_paused": True}
-    history = SnapshotHistory()
-    history.push("甲", "", source="AI", rec_t=4.0)
-    history.push("乙" + HUMAN_EDIT_TAG, "", source="人類修改", rec_t=9.0, rec_hidden=[2, 5])
-    history.push("丙", "", source="AI", rec_t=9.0, rec_hidden=[])               # none hidden: nothing is stored
-    assert history.snapshots[1]["rec_hidden"] == [2, 5] and "rec_hidden" not in history.snapshots[2]
-    copy = SnapshotHistory()
-    copy.restore(history.to_dict())
-    assert copy.snapshots[1]["rec_hidden"] == [2, 5]
-    text = build_record_diff_context(history.snapshots[:2], 1)
-    assert "@錄音 00:09，逐字稿 #2、#5 當時還沒出現在畫面上（之後才出現，算修改之後）" in text
-    many = SnapshotHistory()
-    many.push("a", "", source="AI", rec_t=1)
-    many.push("b", "", source="AI", rec_t=90, rec_hidden=list(range(1, 31)))
-    assert "等共 30 段" in build_record_diff_context(many.snapshots, 1)
-
-
-def test_the_last_version_of_an_agent_turn_keeps_the_hidden_segments_of_the_turns_clock():
-    history = SnapshotHistory()
-    history.push("a", "", source="init")
-    processor = make_processor(history, (99.0, False))
-    result = {"note_changed": True, "at_changed": False, "turn_number": 3, "note": "d", "at": "",
-              "record_snapshots": [{"note": "c", "at": "", "source": "Turn 3-2 update_record", "rec_t": 40.0, "rec_hidden": [2]}]}
-    processor._apply_record_changes(result, "fp", "dt")
-    assert [snap.get("rec_hidden") for snap in history.snapshots] == [None, [2], [2]]
-
-
 TRANSCRIPT = ("【診間對話逐字稿 · 截至 01:00】\n語音#1 00:05–00:20 頭痛三天\n語音#2 00:20–00:35 家屬說最近一次檢查 HbA1c 是 7.1%\n"
               "語音#3 00:45–01:00 好，我們再看看")
 
 
-def test_the_diff_says_which_transcript_lines_were_on_the_screen_when_a_version_was_made():
+def test_the_diff_roughly_says_which_transcript_lines_came_before_and_after_a_version():
     history = SnapshotHistory()
     history.push("甲", "", source="AI", rec_t=10)
-    history.push("乙" + HUMAN_EDIT_TAG, "", source="人類修改", rec_t=40.7, rec_hidden=[2])         # #2 ends before 00:40, but was not shown yet
+    history.push("乙" + HUMAN_EDIT_TAG, "", source="人類修改", rec_t=40.7)
     out = build_record_diff_context(history.snapshots, 1, voice_transcript=TRANSCRIPT)
-    assert "（版本 2 的逐字稿先後：逐字稿 #1 在畫面上，早於這個版本；逐字稿 #2~#3 晚於這個版本。）" in out
-    plain = SnapshotHistory()
-    plain.push("甲", "", source="AI", rec_t=10)
-    plain.push("乙", "", source="人類修改", rec_t=40.7)
-    assert "逐字稿 #1~#2 在畫面上，早於這個版本；逐字稿 #3 晚於這個版本" in build_record_diff_context(plain.snapshots, 1, voice_transcript=TRANSCRIPT)
+    assert "（版本 2 的逐字稿先後（以時間粗略估計）：逐字稿 #1~#2 約早於這個版本；逐字稿 #3 晚於這個版本。）" in out
+    # the line that ends at the boundary itself is before it; whole seconds, as the lines show them: 00:35 is later than 34.9 s
     short = SnapshotHistory()
     short.push("甲", "", source="AI", rec_t=10)
-    short.push("乙", "", source="人類修改", rec_t=34.9)                                          # whole seconds, as the lines show them: 00:35 is later
-    assert "逐字稿 #1 在畫面上，早於這個版本；逐字稿 #2~#3 晚於這個版本" in build_record_diff_context(short.snapshots, 1, voice_transcript=TRANSCRIPT)
+    short.push("乙", "", source="人類修改", rec_t=34.9)
+    assert "逐字稿 #1 約早於這個版本；逐字稿 #2~#3 晚於這個版本" in build_record_diff_context(short.snapshots, 1, voice_transcript=TRANSCRIPT)
     # a version made before the recording began: every line is after it; a session with no transcript lines gets no such note
     before = SnapshotHistory()
     before.push("甲", "", source="AI")
@@ -471,41 +434,20 @@ def test_the_diff_says_which_transcript_lines_were_on_the_screen_when_a_version_
     long = SnapshotHistory()
     long.push("甲", "", source="AI", rec_t=10)
     long.push("乙", "", source="人類修改", rec_t=4000)
-    assert "逐字稿 #9 在畫面上" in build_record_diff_context(long.snapshots, 1, voice_transcript="語音#9 1:02:03–1:05:00 好")
+    assert "逐字稿 #9 約早於" in build_record_diff_context(long.snapshots, 1, voice_transcript="語音#9 1:02:03–1:05:00 好")
 
 
-
-def test_lines_are_ordered_against_a_version_by_segment_number_not_by_the_second_they_show():
-    from voice.service import Position
+def test_the_main_agent_stamps_a_version_with_the_clock_it_was_given():
     from Main_Agent import MainAgent
     agent = MainAgent.__new__(MainAgent)
-    agent.rec_clock = lambda: Position(9.1, False, (), 1)
-    assert agent._rec_fields() == {"rec_t": 9.1, "rec_seen": 1}
-    # the edit at 9.1 s saw #1 (ends 9.1 s); #2 ends at 9.9 s: both read 00:09
-    transcript = "語音#1 00:02–00:09 頭痛三天\n語音#2 00:09–00:09 還有胸痛"
-    history = SnapshotHistory()
-    history.push("甲", "", source="AI", rec_t=1, rec_seen=0)
-    history.push("乙" + HUMAN_EDIT_TAG, "", source="人類修改", rec_t=9.1, rec_seen=1)
-    assert history.snapshots[1]["rec_seen"] == 1
-    out = build_record_diff_context(history.snapshots, 1, voice_transcript=transcript)
-    assert "（版本 2 的逐字稿先後：逐字稿 #1 在畫面上，早於這個版本；逐字稿 #2 晚於這個版本。）" in out
-    # without the number, the same second cannot be placed: it is not declared old
-    plain = SnapshotHistory()
-    plain.push("甲", "", source="AI", rec_t=1)
-    plain.push("乙", "", source="人類修改", rec_t=9.1)
-    assert "（版本 2 的逐字稿先後：逐字稿 #1~#2 晚於這個版本。）" in build_record_diff_context(plain.snapshots, 1, voice_transcript=transcript)
-    # a number and a hidden one together
-    both = SnapshotHistory()
-    both.push("甲", "", source="AI", rec_t=1, rec_seen=0)
-    both.push("乙", "", source="人類修改", rec_t=9.1, rec_seen=2, rec_hidden=[1])
-    assert "逐字稿 #2 在畫面上，早於這個版本；逐字稿 #1 晚於這個版本" in build_record_diff_context(both.snapshots, 1, voice_transcript=transcript)
+    agent.rec_clock = lambda: (9.0, True)
+    assert agent._rec_fields() == {"rec_t": 9.0, "rec_paused": True}
+    agent.rec_clock = lambda: (0.0, False)
+    assert agent._rec_fields() == {"rec_t": 0.0}                         # a recording, no transcript yet
+    agent.rec_clock = lambda: (None, False)
+    assert agent._rec_fields() == {}                                     # no recording
+    agent.rec_clock = None
+    assert agent._rec_fields() == {}
 
 
-def test_the_last_version_of_an_agent_turn_keeps_the_latest_segment_of_the_turns_clock():
-    history = SnapshotHistory()
-    history.push("a", "", source="init")
-    processor = make_processor(history, (99.0, False))
-    result = {"note_changed": True, "at_changed": False, "turn_number": 3, "note": "d", "at": "",
-              "record_snapshots": [{"note": "c", "at": "", "source": "Turn 3-2 update_record", "rec_t": 40.0, "rec_seen": 5}]}
-    processor._apply_record_changes(result, "fp", "dt")
-    assert [snap.get("rec_seen") for snap in history.snapshots] == [None, 5, 5]
+

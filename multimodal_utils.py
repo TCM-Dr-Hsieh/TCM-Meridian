@@ -25,6 +25,11 @@ def encode_image_to_base64(file_path: str) -> Optional[str]:
         return None
 
 
+def image_is_readable(file_path: str) -> bool:
+    """The picture can be handed to a model: the file is there and can be read (what `encode_image_to_base64` needs)."""
+    return bool(file_path) and os.path.isfile(file_path) and os.access(file_path, os.R_OK)
+
+
 def get_image_media_type(file_path: str) -> str:
     """根據副檔名推斷圖片的 MIME 類型。"""
     mime, _ = mimetypes.guess_type(file_path)

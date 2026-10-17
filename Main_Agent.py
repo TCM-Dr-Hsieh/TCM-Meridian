@@ -14,7 +14,7 @@ from typing import Any, Callable, Optional
 
 from openai import OpenAI
 import model_json
-from multimodal_utils import inject_images_into_messages
+from multimodal_utils import image_is_readable, inject_images_into_messages
 from record_diff_context import build_record_diff_context
 from agent_behavior_log import append_behavior_event
 from deidentification_utils import format_patient_basic_info_for_llm
@@ -2082,13 +2082,22 @@ class MainAgent:
         """將當輪讀取的檔案格式化為文字區塊，供注入各 Subagent 的 prompt。"""
         if not self._loaded_files:
             return ""
-        file_blocks = []
+        return "\n\n".join(self._loaded_file_blocks())
+
+    def _loaded_file_blocks(self) -> list[str]:
+        """One block of text per file read this turn, for every agent's prompt. A picture is said to be attached only if it can be: the
+        models get the picture itself in the same message, and a file that is gone (moved, deleted after it was read, a session restored
+        elsewhere) is attached to nothing, so the text must not claim it and the agent must not take "no picture" for "nothing in it"."""
+        blocks = []
         for lf in self._loaded_files:
             if lf["type"] == "text":
-                file_blocks.append(f"### 📄 {lf['name']}\n{lf['content']}")
+                blocks.append(f"### 📄 {lf['name']}\n{lf['content']}")
             elif lf["type"] == "image":
-                file_blocks.append(f"### 🖼️ {lf['name']}\n（圖片已載入，見多模態訊息）")
-        return "\n\n".join(file_blocks)
+                if image_is_readable(lf.get("path", "")):
+                    blocks.append(f"### 🖼️ {lf['name']}\n（圖片已載入，見多模態訊息）")
+                else:
+                    blocks.append(f"### 🖼️ {lf['name']}\n（圖片檔目前讀取不到，沒有附上圖片本體，內容無法核對）")
+        return blocks
 
     def _build_context_prompt(
         self,
@@ -2210,14 +2219,8 @@ class MainAgent:
 
         # 當輪讀取檔案暫存區（每個主輪開始時清空）
         if self._loaded_files:
-            file_blocks = []
-            for lf in self._loaded_files:
-                if lf["type"] == "text":
-                    file_blocks.append(f"### 📄 {lf['name']}\n{lf['content']}")
-                elif lf["type"] == "image":
-                    file_blocks.append(f"### 🖼️ {lf['name']}\n（圖片已載入，見多模態訊息）")
             parts.append(f"""## 【當輪讀取檔案暫存區】（本區塊僅存在於本主輪）
-{chr(10).join(file_blocks)}""")
+{chr(10).join(self._loaded_file_blocks())}""")
         else:
             parts.append("""## 【當輪讀取檔案暫存區】（本區塊僅存在於本主輪）
 （空白）""")

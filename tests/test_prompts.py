@@ -134,6 +134,7 @@ def test_the_review_contract_fixes_are_in_the_prompts():
     lc_text = read("lc")
     assert "圖片本體會以多模態訊息附在這則訊息裡，你看得到" in lc_text and "**該圖片本輪已載入**" in lc_text and "**該圖片本輪沒有載入**" in lc_text
     assert "核對描述有沒有超出圖片內容" in lc_text and "本 Subagent 不重新審查圖片本體" not in lc_text            # it looks at the picture now
+    assert "讀取不到、沒有附上圖片本體" in lc_text and "不可以把「沒收到圖」當成「圖上沒有這個內容」" in lc_text   # a picture that did not arrive is not "nothing in it"
     lc = read("lc")
     assert "你不會收到討論區內容" in lc and "`occurrence`（選填，整數）" in lc and "最近的欄位標題" in lc
     assert "不得提醒補回" in read("nr")

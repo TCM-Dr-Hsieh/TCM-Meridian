@@ -444,3 +444,32 @@ def test_the_picture_goes_along_when_the_scan_asks_the_model_to_repair_its_answe
     assert len(agent.client.calls) == 3                                                     # asked, asked to repair, asked again
     for call in agent.client.calls:
         assert isinstance(call["messages"][1]["content"], list) and call["messages"][1]["content"][1]["type"] == "image_url"
+
+
+def test_a_picture_is_said_to_be_attached_only_when_it_can_be(tmp_path):
+    from Main_Agent import MainAgent
+    agent = MainAgent(CONFIG, CONFIG, None, CONFIG, CONFIG)
+    here = image_entry(tmp_path, "here.png")
+    gone = {"name": "gone.png", "type": "image", "path": str(tmp_path / "gone.png")}
+    nameless = {"name": "nameless.png", "type": "image"}                          # a restored entry without a path
+    agent._loaded_files = [here, gone, nameless, {"name": "lab.md", "type": "text", "content": "HbA1c 7.3%"}]
+    block = agent._format_loaded_files_block()
+    assert "### 🖼️ here.png\n（圖片已載入，見多模態訊息）" in block
+    for name in ("gone.png", "nameless.png"):
+        assert f"### 🖼️ {name}\n（圖片檔目前讀取不到，沒有附上圖片本體，內容無法核對）" in block
+    assert block.count("見多模態訊息") == 1 and "### 📄 lab.md\nHbA1c 7.3%" in block
+    # the main agent's own prompt says the same thing, from the same place
+    prompt = agent._build_context_prompt("看圖", "", "", None, "2026-10-17", [])
+    assert "### 🖼️ gone.png\n（圖片檔目前讀取不到" in prompt and prompt.count("見多模態訊息") == 1
+
+
+def test_the_scan_is_not_told_a_missing_picture_is_attached(tmp_path):
+    from Main_Agent import MainAgent
+    agent = MainAgent(CONFIG, CONFIG, None, CONFIG, CONFIG)
+    agent._loaded_files = [{"name": "bp_photo.png", "type": "image", "path": str(tmp_path / "bp_photo.png")}]        # read once, gone since
+    scan = lc(strength=1, rounds=1)
+    scan.client = fake_client(json.dumps({"intercept": "pass", "low_confidence_phrases": []}))
+    scan.execute(note_content=NOTE, loaded_files_block=agent._format_loaded_files_block(), image_files=agent._loaded_files)
+    user = scan.client.calls[0]["messages"][1]["content"]
+    assert isinstance(user, str)                                                         # no picture went out ...
+    assert "讀取不到，沒有附上圖片本體" in user and "見多模態訊息" not in user               # ... and the text does not say one did

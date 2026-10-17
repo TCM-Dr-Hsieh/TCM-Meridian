@@ -174,8 +174,6 @@ class MainAgent:
 
         # 暫停狀態（IC Subagent 暫停/恢復用）
         self._suspended: dict | None = None
-        # 本主輪 NOTE 最近一次的登載方針（低信心標註依它判斷遺漏的範圍；每個主輪開始時清空）
-        self._last_note_update_guidelines: str = ""
 
         # 患者檔案查詢狀態
         self._file_list_cache: str | None = None       # list_patient_files 的結果文字
@@ -798,7 +796,6 @@ class MainAgent:
         _log(f"{'='*60}\n")
 
         # 每個主輪開始時：清空當輪暫存檔案
-        self._last_note_update_guidelines = ""
         self._loaded_files.clear()
         self._file_list_cache = None
         self._patient_folder = patient_folder or self._patient_folder
@@ -875,7 +872,6 @@ class MainAgent:
         self._suspended = None
         if rec_clock is not None:
             self.rec_clock = rec_clock
-        self._last_note_update_guidelines = s.get("update_guidelines", "")        # 本主輪登載方針的範圍，隨暫停狀態存檔／還原
         self._loaded_files = [dict(entry) for entry in s.get("loaded_files", [])]  # 本主輪已讀的檔案：審查與低信心標註要靠它核實引用
 
         def _log(msg: str):
@@ -1242,8 +1238,6 @@ class MainAgent:
 
                 target_field = action_input.get("target_field", "note")
                 guidelines = action_input.get("guidelines", "")
-                if target_field == "note":
-                    self._last_note_update_guidelines = guidelines      # 本輪 NOTE 最近一次的登載方針：低信心標註依它判斷遺漏的範圍
 
                 _log(f"[Main Agent] 呼叫 Record Subagent: field={target_field}")
 
@@ -1360,7 +1354,6 @@ class MainAgent:
                     "record_history_current_index": record_history_current_index,
                     "original_note": original_note,
                     "original_at": original_at,
-                    "update_guidelines": self._last_note_update_guidelines,
                     "loaded_files": [dict(entry) for entry in self._loaded_files],
                 }
                 if self._active_turn:
@@ -1406,7 +1399,6 @@ class MainAgent:
                         history_summary=history_summary,
                         record_diff_context=_current_record_diff_context(),
                         loaded_files_block=self._format_loaded_files_block(),
-                        update_guidelines=self._last_note_update_guidelines,
                         image_files=self._loaded_files,
                         log_callback=log_callback,
                         behavior_context={"folder_path": self._patient_folder, "date_str": session_date},
@@ -1538,7 +1530,6 @@ class MainAgent:
                         "record_history_current_index": record_history_current_index,
                         "original_note": original_note,
                         "original_at": original_at,
-                        "update_guidelines": self._last_note_update_guidelines,
                         "loaded_files": [dict(entry) for entry in self._loaded_files],
                     }
                     if self._active_turn:

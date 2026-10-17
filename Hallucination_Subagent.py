@@ -80,7 +80,6 @@ class HallucinationSubagent:
         record_diff_context: str = "",
         forum_history: str = "",
         loaded_files_block: str = "",
-        update_guidelines: str = "",
         previous_content: str | None = None,
         image_files: list | None = None,
         log_callback: Optional[Callable[[str], None]] = None,
@@ -93,7 +92,6 @@ class HallucinationSubagent:
             field: 欄位名（"note" 或 "assessment_&_treatment"）
             content: 即將寫入的病歷內容
             previous_content: 這次更新之前的欄位內容；給了就附上「修改前 → 即將登載」的改動，審查者據此分辨哪些是這次新增或改寫的
-            update_guidelines: 病歷登載助理收到的本次登載方針（決定這次是局部更新還是全面整併，審查的遺漏範圍依它）
             conversation_history: 人類醫師與 AI 主治醫師的互動過程
             last_visit_block: 上次就診病歷內容
             history_summary: 歷史病歷摘要
@@ -151,15 +149,11 @@ class HallucinationSubagent:
                 "（diff 只列出有改動的行與緊鄰的前後各 1 行；沒有列出的內容，這次沒動）\n"
                 f"```diff\n{delta or '（沒有改動）'}\n```\n"
             )
-        guidelines_section = (
-            f"\n## 【本次登載方針（病歷登載助理收到的指示）】\n{update_guidelines}\n" if update_guidelines else ""
-        )
-
         user_prompt = f"""## 【即將登載的病歷更新】
 欄位：{field}
 內容：
 {content}
-{delta_section}{guidelines_section}{record_diff_text}
+{delta_section}{record_diff_text}
 {conversation_section}{interview_section}{voice_section}{forum_section}{loaded_files_section}
 請根據以上資訊，進行幻覺與過度聲稱審查。輸出 JSON。"""
 

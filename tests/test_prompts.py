@@ -121,18 +121,21 @@ def test_the_review_contract_fixes_are_in_the_prompts():
         assert "「稍微口乾」、「偶有胸悶」、「疑為" not in text, name
     record = read("record")
     assert "### 更新範圍：局部更新與全面整併" in record and "notes_for_main" in record
+    assert "範圍以人類醫師本人的話為準，不以主治醫師的方針為準" in record and "不採信" in record      # the writer stays the guard against a narrowing guideline
     assert "### 既有的低信心警示" in record and "不需要、也不可替它加來源標籤" in record
     hallucination = read("hallucination")
-    assert "### 重要：登載方針決定遺漏檢查的範圍" in hallucination and "【本次更新的改動】" in hallucination
+    assert "### 重要：醫師限定的更新範圍決定遺漏檢查的範圍" in hallucination and "【本次更新的改動】" in hallucination
+    assert "範圍以人類醫師本人的話為準，不以主治醫師的方針為準" in hallucination and "【本次登載方針】" not in hallucination
     assert "判斷看**事實內容**，不是看整行有沒有出現在 `+` 行" in hallucination and "忠實揭示的不確定性" in hallucination
     assert "逐個比對數值與結論" in hallucination and "數值或結論不同就是改寫" in hallucination
     assert "而且沒有出現在【本次更新的改動】" not in hallucination and "引用與數值都沒變的既有事實，先放行" in hallucination and "新增或改寫的，不放行" in hallucination
     assert "離改動處較遠的內容不會出現，代表這次沒動" in hallucination and "先看它有沒有出現在【本次更新的改動】的 `+` 行" in hallucination
-    assert "### 重要：登載方針決定遺漏判定的範圍" in read("lc")
+    assert "### 重要：醫師限定的更新範圍決定遺漏判定的範圍" in read("lc") and "本輪病歷更新的登載方針" not in read("lc")
     lc = read("lc")
     assert "你不會收到討論區內容" in lc and "`occurrence`（選填，整數）" in lc and "最近的欄位標題" in lc
     assert "不得提醒補回" in read("nr")
     main = read("main")
     assert "局部更新：只更新血壓，其餘內容不動" in main and "低信心標註未完成" in main
+    assert "不要自行縮小範圍" in main and "方針自己寫成的局部更新不會被採信" in main
     assert "稍微口乾" not in main
     assert "方針範圍與症狀追問的分工" in read("prompt_information_collection_subagent.txt")

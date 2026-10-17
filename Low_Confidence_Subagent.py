@@ -189,7 +189,6 @@ class LowConfidenceSubagent:
         history_summary: str = "",
         record_diff_context: str = "",
         loaded_files_block: str = "",
-        update_guidelines: str = "",
         image_files: list | None = None,
         log_callback: Optional[Callable[[str], None]] = None,
         behavior_context: dict | None = None,
@@ -309,7 +308,6 @@ class LowConfidenceSubagent:
                 loaded_files_block=loaded_files_block,
                 behavior_context=behavior_context,
                 log_callback=log_callback,
-                update_guidelines=update_guidelines,
             )
 
             intercept = check_result.get("intercept", "pass")
@@ -489,7 +487,6 @@ class LowConfidenceSubagent:
         behavior_context: dict | None = None,
         log_callback: Optional[Callable[[str], None]] = None,
         voice_transcript: str = "",
-        update_guidelines: str = "",
     ) -> dict[str, Any]:
         """
         執行一輪 LC 掃描。
@@ -523,8 +520,6 @@ class LowConfidenceSubagent:
 ## 【當輪讀取檔案暫存區】
 {loaded_files_block if loaded_files_block else '（空白）'}
 """
-        if update_guidelines:
-            user_prompt += f"\n## 【本輪病歷更新的登載方針】\n{update_guidelines}\n"
 
         # 非首輪時附加已標註與失敗摘要
         if round_num > 1:

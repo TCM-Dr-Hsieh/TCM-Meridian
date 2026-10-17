@@ -127,17 +127,7 @@ def test_the_scan_marks_the_second_place_when_the_model_says_occurrence_2_and_ig
         assert agent.execute(note_content=NOTE)["annotated_note"].startswith("甲- 現病史：**否認胸痛（r）**")     # the old rule: the first place
 
 
-def test_the_reviewer_is_told_the_scope_of_the_update():
-    reviewer = HallucinationSubagent({**CONFIG, "detection_strength": 1})
-    reviewer.client = fake_client(json.dumps({"thinking": "", "agree": "yes", "comment": ""}))
-    reviewer.review(field="note", content="血壓 120/80", update_guidelines="局部更新：只更新血壓，其餘內容不動")
-    user = reviewer.client.calls[-1]["messages"][1]["content"]
-    assert "## 【本次登載方針（病歷登載助理收到的指示）】" in user and "局部更新：只更新血壓，其餘內容不動" in user
-    reviewer.review(field="note", content="血壓 120/80")
-    assert "本次登載方針" not in reviewer.client.calls[-1]["messages"][1]["content"]
-
-
-def test_the_record_writer_hands_its_guidelines_to_the_reviewer_and_its_warning_to_the_main_agent():
+def test_the_record_writer_hands_its_warning_to_the_main_agent():
     seen = {}
 
     class Reviewer:
@@ -152,7 +142,7 @@ def test_the_record_writer_hands_its_guidelines_to_the_reviewer_and_its_warning_
     writer.client = fake_client(json.dumps(reply, ensure_ascii=False))
     guidelines = "局部更新：只更新血壓，其餘內容不動"
     result = writer.execute(note_content="血壓：", at_content="", target_field="note", guidelines=guidelines)
-    assert result["success"] is True and seen["update_guidelines"] == guidelines
+    assert result["success"] is True and "update_guidelines" not in seen          # the scope is read from the chat, not from this text
     assert result["notes_for_main"] == "對話中患者說對青黴素過敏，這次是局部更新，沒有寫入"
     # nothing to change: the warning still reaches the Main Agent
     reply2 = {"thinking": "t", "target_field": "note", "notes_for_main": "只有提醒", "operations": []}
@@ -219,16 +209,6 @@ def test_a_well_formed_reply_is_accepted_even_when_it_contradicts_itself():
     both = {"intercept": "pass", "low_confidence_phrases": [{"original_phrase": "否認胸痛", "reason": "r"}, {"bad": 1}]}
     agent.client = fake_client(json.dumps(both))                                                          # a valid phrase among invalid ones is kept
     assert agent.execute(note_content=NOTE)["total_annotated"] == 1
-
-
-def test_the_scan_prompt_carries_the_scope_of_this_turns_update_only_when_there_is_one():
-    agent = lc(strength=1, rounds=1)
-    agent.client = fake_client(json.dumps({"intercept": "pass", "low_confidence_phrases": []}))
-    agent.execute(note_content=NOTE, update_guidelines="局部更新：只更新血壓，其餘內容不動")
-    user = agent.client.calls[-1]["messages"][1]["content"]
-    assert "## 【本輪病歷更新的登載方針】" in user and "局部更新：只更新血壓，其餘內容不動" in user
-    agent.execute(note_content=NOTE)
-    assert "本輪病歷更新的登載方針" not in agent.client.calls[-1]["messages"][1]["content"]
 
 
 def refusing_writer(reviewer):
@@ -325,42 +305,6 @@ def test_the_step_result_says_what_the_unfinished_scan_lacked():
     assert "輸出解析失敗" not in lc_incomplete_text({"scan_errors": 0, "total_rounds": 1, "total_annotated": 1, "skipped_items": [{"item": "x"}]})
 
 
-def test_the_scope_of_the_update_survives_a_save_and_restore_during_the_interview():
-    from Main_Agent import MainAgent
-
-    def build():
-        return MainAgent(CONFIG, CONFIG, None, CONFIG, CONFIG)
-
-    first = build()
-    script = iter([
-        {"thinking": "t", "action": "update_record", "action_input": {"target_field": "note", "guidelines": "局部更新：只更新血壓"}, "next_step": ""},
-        {"thinking": "t", "action": "information_collection_subagent", "action_input": "問頭痛", "next_step": ""},
-    ])
-    first._call_llm = lambda *args, **kwargs: next(script)
-    first.record_subagent.execute = lambda **kwargs: {"success": True, "note": "血壓 128/82[人類醫師_T1]", "at": "", "operations": [],
-                                                      "review_result": "agree", "review_rounds": 1}
-    started = first.process_message("更新血壓", "", "", session_date="2026-10-17")
-    assert started["waiting_for_interview"] is True
-
-    second = build()                                                   # a new assistant, as after a restart
-    second.restore_state(json.loads(json.dumps(first.export_state())))
-    seen = {}
-
-    def spy(**kwargs):
-        seen.update(kwargs)
-        return {"success": True, "annotated_note": kwargs["note_content"], "total_rounds": 1, "total_annotated": 0, "all_phrases": [],
-                "scan_errors": 0, "skipped_items": [], "incomplete": False, "error": None}
-
-    second.lc_subagent.execute = spy
-    after = iter([
-        {"thinking": "t", "action": "low_confidence_check", "action_input": "", "next_step": ""},
-        {"thinking": "t", "action": "reply", "action_input": "好", "next_step": ""},
-    ])
-    second._call_llm = lambda *args, **kwargs: next(after)
-    done = second.continue_after_interview("", "問診完成", "血壓 128/82[人類醫師_T1]", "")
-    assert done["reply"] == "好" and seen["update_guidelines"] == "局部更新：只更新血壓"
-
-
 def test_a_failed_call_while_asking_for_the_repair_keeps_what_the_first_answer_held():
     def reply(kwargs):
         if len(kwargs["messages"]) > 2:
@@ -441,3 +385,21 @@ def test_the_main_agent_hands_the_writer_a_diff_that_says_which_transcript_lines
     agent.process_message("更新", "甲2", "", record_history_snapshots=snapshots, record_history_current_index=1,
                           voice_transcript=transcript, session_date="2026-10-17")
     assert "（版本 2 的逐字稿先後（以時間粗略估計）：逐字稿 #1~#2 約早於這個版本；逐字稿 #3 晚於這個版本。）" in seen["record_diff_context"]
+
+
+def test_the_scope_is_read_from_the_physicians_words_in_the_chat_not_from_a_guideline_text():
+    import inspect
+    assert "update_guidelines" not in inspect.signature(HallucinationSubagent.review).parameters
+    assert "update_guidelines" not in inspect.signature(LowConfidenceSubagent.execute).parameters
+    said = "【人類醫師】\n只幫我更新血壓，其他不要動"
+    reviewer = HallucinationSubagent({**CONFIG, "detection_strength": 1})
+    reviewer.client = fake_client(json.dumps({"thinking": "", "agree": "yes", "comment": ""}))
+    reviewer.review(field="note", content="血壓 120/80", conversation_history=said, previous_content="血壓：")
+    user = reviewer.client.calls[-1]["messages"][1]["content"]
+    assert said in user and "登載方針" not in user and "## 【本次更新的改動" in user
+    agent = lc(strength=1, rounds=1)
+    agent.client = fake_client(json.dumps({"intercept": "pass", "low_confidence_phrases": []}))
+    agent.execute(note_content=NOTE, conversation_history=said)
+    assert said in agent.client.calls[-1]["messages"][1]["content"] and "登載方針" not in agent.client.calls[-1]["messages"][1]["content"]
+    from Main_Agent import MainAgent
+    assert not hasattr(MainAgent.__new__(MainAgent), "_last_note_update_guidelines")

@@ -587,7 +587,6 @@ class RecordSubagent:
 
             review_result = self.hallucination_reviewer.review(
                 field=target_field,
-                update_guidelines=guidelines,
                 previous_content=target_content,
                 content=review_content,
                 conversation_history=conversation_history,

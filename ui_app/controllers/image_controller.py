@@ -180,7 +180,9 @@ def build_image_tab(ui: Any, app_state: dict[str, Any], today: str):
         fp = app_state.get("selected_patient_folder")
         file_list_container.clear()
         img_state["file_list"] = []
-        sync_viewer([])                        # the list is made again with nothing ticked: the viewer has nothing to show
+        # the previews and the viewer belong to the list that was (another patient's pictures, or the ones ticked before a save,
+        # a delete or a new scan): the list is made again with nothing ticked
+        render_previews()
 
         if not fp:
             with file_list_container:
@@ -239,7 +241,6 @@ def build_image_tab(ui: Any, app_state: dict[str, Any], today: str):
                 except Exception:
                     pass
                 refresh_file_list()
-                render_previews()
 
             ui.button(icon="delete_outline", on_click=on_delete).props(
                 "flat dense round color=negative size=sm"

@@ -146,10 +146,18 @@ def test_the_viewer_follows_the_ticks_of_the_image_tab():
     assert not viewer.opened and viewer.w.panel.visible is False
 
 
-def test_a_picture_that_went_away_says_so_instead_of_showing_another():
+def test_a_picture_that_went_away_says_so_and_the_one_shown_before_is_cleared():
     viewer, ui, _ = make(fail={"Picture_Row/p2.jpg"})
-    viewer.open(PICTURES, 1)
-    assert viewer.w.title.text == "p2.jpg（讀取不到）" and "tcmViewer.show" not in ui.scripts[-1]
+    viewer.open(PICTURES, 0)                                                           # p1 on show
+    viewer.step(1)                                                                     # p2 is gone
+    box, pct = f"c{viewer.w.box.id}", f"c{viewer.w.pct.id}"
+    assert viewer.w.title.text == "p2.jpg（讀取不到）"
+    assert ui.scripts[-1] == f"window.tcmViewer.blank('{box}', '{pct}', '讀取不到這張圖片')"   # p1 does not stay under p2's name
+    viewer.step(1)                                                                     # the next one is there again
+    assert viewer.w.title.text == "p3.jpg" and ui.scripts[-1].endswith("'/_nicegui/auto/static/x/p3.jpg')")
+    viewer, ui, _ = make(fail={"Picture_Row/p2.jpg"})
+    viewer.open(PICTURES, 1)                                                           # opened on it
+    assert viewer.w.title.text == "p2.jpg（讀取不到）" and "tcmViewer.blank" in ui.scripts[-1]
 
 
 def test_a_picture_gets_one_url_per_version_of_its_file(tmp_path):
@@ -171,3 +179,11 @@ def test_a_picture_gets_one_url_per_version_of_its_file(tmp_path):
 
 def test_the_browser_script_keeps_the_zoom_between_ten_percent_and_eight_times():
     assert "MIN = 0.1, MAX = 8" in JS and "'wheel'" in JS and "pointerdown" in JS and "rotate(" in JS
+
+
+def test_the_browser_script_clears_the_picture_before_the_next_one_comes_and_when_it_cannot_load():
+    show = JS[JS.index("show: function"):JS.index("blank: function")]
+    assert show.index("blank(id, '載入中…')") < show.index("p.img.src = src")                 # the old picture goes at once
+    assert "p.img.onerror = function () { blank(id, '讀取不到這張圖片'); }" in show
+    clear = JS[JS.index("function blank("):JS.index("function apply(")]
+    assert "removeAttribute('src')" in clear and "onerror = null" in clear and "visibility = 'hidden'" in clear

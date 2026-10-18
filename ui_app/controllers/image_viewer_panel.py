@@ -5,6 +5,8 @@ the header), built once outside the tab panels. It opens on a picture of the ima
 that are ticked there (◀ ▶). The zoom, the position and the turn live in the browser (`window.tcmViewer`): the wheel zooms around
 the cursor, a drag moves the picture, the buttons zoom in and out, fit the picture to the window, show it at its own size (100 %) and
 turn it by 90°. Turning only changes what is shown; the file is never touched. The zoom runs from 10 % to 800 %; a picture opens fitted.
+The picture before is cleared as soon as another one is asked for; one that cannot be read (gone from the disk, or failing to load in
+the browser) leaves the window empty with a message, never the picture before under its name.
 """
 from __future__ import annotations
 
@@ -21,6 +23,9 @@ CSS = """
 .viewer-box.moving {cursor:grabbing;}
 .viewer-img {position:absolute; left:0; top:0; max-width:none; max-height:none; transform-origin:50% 50%; user-select:none;
              pointer-events:none; image-orientation:from-image;}
+.viewer-msg {position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#888; font-size:14px;
+             pointer-events:none;}
+.viewer-msg[hidden] {display:none;}
 """
 
 JS = """
@@ -31,9 +36,25 @@ window.tcmViewer = (function () {
     return box ? {box: box, img: box.querySelector('img.viewer-img')} : null;
   }
   function state(id) { return views[id] || (views[id] = {s: 1, r: 0, cx: 0, cy: 0, w: 0, h: 0, pct: null, bound: false}); }
-  function apply(id) {
+  function message(p, text) {
+    const m = p.box.querySelector('.viewer-msg');
+    if (m) { m.textContent = text; m.hidden = !text; }
+  }
+  function blank(id, text) {
+    // nothing on show but the message: the previous picture never stays under another picture's name
     const p = parts(id), v = state(id);
     if (!p || !p.img) return;
+    p.img.onload = p.img.onerror = null;
+    p.img.removeAttribute('src');
+    p.img.style.visibility = 'hidden';
+    v.w = v.h = 0;
+    message(p, text);
+    const pct = v.pct && document.getElementById(v.pct);
+    if (pct) pct.textContent = '—';
+  }
+  function apply(id) {
+    const p = parts(id), v = state(id);
+    if (!p || !p.img || !v.w) return;
     p.img.style.width = v.w + 'px';
     p.img.style.height = v.h + 'px';
     p.img.style.transform = 'translate(' + (v.cx - v.w / 2) + 'px,' + (v.cy - v.h / 2) + 'px) rotate(' + v.r + 'deg) scale(' + v.s + ')';
@@ -92,9 +113,17 @@ window.tcmViewer = (function () {
       if (!p || !p.img) return;
       v.pct = pctId;
       bind(id);
-      p.img.onload = function () { v.w = p.img.naturalWidth; v.h = p.img.naturalHeight; v.r = 0; fit(id); };
+      blank(id, '載入中…');               // the previous picture goes at once, not when the next one has come
+      p.img.onload = function () {
+        v.w = p.img.naturalWidth; v.h = p.img.naturalHeight; v.r = 0;
+        p.img.style.visibility = '';
+        message(p, '');
+        fit(id);
+      };
+      p.img.onerror = function () { blank(id, '讀取不到這張圖片'); };
       p.img.src = src;
     },
+    blank: function (id, pctId, text) { state(id).pct = pctId; blank(id, text); },
     zoom: function (id, factor) { const p = parts(id); if (p) zoomAt(id, factor, p.box.clientWidth / 2, p.box.clientHeight / 2); },
     fit: fit,
     actual: function (id) { const v = state(id); v.s = 1; apply(id); },
@@ -152,6 +181,7 @@ class ImageViewerPanel:
                 ui.label("滾輪縮放、拖曳移動、連按兩下符合視窗").classes("hint").style("margin-left:8px")
             with ui.element("div").classes("viewer-box") as w.box:
                 ui.element("img").classes("viewer-img").props('alt=""')
+                ui.element("div").classes("viewer-msg").props("hidden")
         w.panel.set_visibility(False)
 
     def _tool(self, icon: str, tip: str, action: str, value: float | int | None = None) -> None:
@@ -219,5 +249,6 @@ class ImageViewerPanel:
             url = self.url_for(path)
         except OSError:                                    # the file went away between the tick and the look
             self.w.title.set_text(f"{self.images[self.index]['name']}（讀取不到）")
+            self.ui.run_javascript(f"window.tcmViewer.blank('{self._box_id()}', 'c{self.w.pct.id}', '讀取不到這張圖片')")
             return
         self.ui.run_javascript(f"window.tcmViewer.show('{self._box_id()}', 'c{self.w.pct.id}', {url!r})")

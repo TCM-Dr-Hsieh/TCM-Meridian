@@ -5,6 +5,7 @@ import re
 from datetime import datetime
 from typing import Any
 
+from ui_app.controllers.image_viewer_panel import APP_STATE_KEY as VIEWER_KEY
 from ui_app.controllers.session_busy_guard import get_session_busy_guard
 
 
@@ -157,6 +158,17 @@ def build_image_tab(ui: Any, app_state: dict[str, Any], today: str):
                     "color: #aaa; font-size: 15px; margin: 30px auto;"
                 )
 
+    def viewer():
+        return app_state.get(VIEWER_KEY)
+
+    def sync_viewer(selected: list[dict]):
+        if viewer() is not None:
+            viewer().sync(selected)
+
+    def open_viewer(selected: list[dict], index: int):
+        if viewer() is not None:
+            viewer().open(selected, index)
+
     def clear_staged():
         img_state["staged"].clear()
         staged_label.text = ""
@@ -168,6 +180,7 @@ def build_image_tab(ui: Any, app_state: dict[str, Any], today: str):
         fp = app_state.get("selected_patient_folder")
         file_list_container.clear()
         img_state["file_list"] = []
+        sync_viewer([])                        # the list is made again with nothing ticked: the viewer has nothing to show
 
         if not fp:
             with file_list_container:
@@ -236,6 +249,7 @@ def build_image_tab(ui: Any, app_state: dict[str, Any], today: str):
         preview_container.clear()
         selected = [fi for fi in img_state["file_list"] if fi["selected"]]
 
+        sync_viewer(selected)
         if not selected:
             with preview_container:
                 ui.label("請在左側勾選圖片").style(
@@ -244,15 +258,17 @@ def build_image_tab(ui: Any, app_state: dict[str, Any], today: str):
             return
 
         with preview_container:
-            for fi in selected:
+            for index, fi in enumerate(selected):
                 with ui.card().classes("w-full").style("padding: 8px;"):
-                    ui.label(fi["name"]).style(
-                        "font-weight: bold; font-size: 13px; color: #555; margin-bottom: 4px;"
-                    )
-                    ui.image(fi["path"]).style(
-                        "max-width: 100%; max-height: 500px; object-fit: contain; "
-                        "border: 1px solid #ddd; border-radius: 4px;"
-                    )
+                    with ui.row().classes("items-center w-full no-wrap").style("margin-bottom: 4px;"):
+                        ui.label(fi["name"]).style("font-weight: bold; font-size: 13px; color: #555; flex: 1 1 auto;")
+                        ui.button(icon="zoom_in", on_click=lambda i=index: open_viewer(selected, i)).props(
+                            "flat dense round size=sm"
+                        ).tooltip("開啟圖片檢視：放大、縮小、旋轉")
+                    # the whole picture, scaled into the box (QImg crops by default: fit=cover)
+                    ui.image(fi["path"]).props("fit=contain").classes("w-full").style(
+                        "max-height: 500px; border: 1px solid #ddd; border-radius: 4px; cursor: zoom-in;"
+                    ).on("click", lambda i=index: open_viewer(selected, i))
 
     refresh_file_list()
     app_state["_refresh_image_list"] = refresh_file_list

@@ -360,6 +360,8 @@ The application currently has 10 top-level tabs:
 
 The **查閱病歷 (record lookup)** button under the voice button in the left column opens a floating window (dragged by its header, resized at its corner, the page behind stays usable) that shows the patient's other visits read-only: each visit's saved final version, NOTE and A&T, as the browse mode shows them. The visit that is open is listed in light colour and cannot be opened there.
 
+The **Image Query Area** previews show each whole picture. Clicking a preview opens a floating picture viewer: zoom in and out (10%–800%, the mouse wheel zooms around the cursor), drag to move, fit to the window, show at 100 %, and turn by 90° (display only; the file is never changed). ◀ ▶ step through the ticked pictures.
+
 The right side of the **Medical System Main Interface** provides a **Quick Prompts** button above the message box. Its dialog lists prompts on the left and provides a vertically resizable name/content editor on the right. Importing only places text into the physician's message draft for further editing; it never sends the message or starts the Main Agent. If a draft already exists, the physician can replace it, append the prompt, or cancel. Quick prompts are stored globally in the top-level `quick_prompts` field of `config.json`; they are not tied to a patient/session and are not injected into the Main Agent context. Do not store patient-identifying information in them.
 
 ## Patient Data Format

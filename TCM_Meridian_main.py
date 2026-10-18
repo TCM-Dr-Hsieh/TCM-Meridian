@@ -32,6 +32,7 @@ from ui_app.controllers.patient_controller import build_patient_registration_tab
 from ui_app.controllers.professor_controller import build_professor_settings_tab
 from ui_app.controllers.tab_controller import TabController
 from ui_app.controllers.template_controller import build_record_template_tab
+from ui_app.controllers.image_viewer_panel import ImageViewerPanel, served_url
 from ui_app.controllers.record_lookup_panel import RecordLookupPanel
 from ui_app.controllers.record_reference_panel import RecordReferencePanel
 from ui_app.controllers.voice_controller import VoiceController
@@ -406,6 +407,8 @@ def build_ui():
     # 「查閱病歷」浮動視窗：唯讀瀏覽這位患者其他日期的病歷（左欄按鈕在主介面分頁建立時綁定）
     RecordLookupPanel(ui=ui, app_state=app_state, list_sessions=list_sessions, get_session_summaries=get_session_summaries,
                       load_session_content=load_session_content).build()
+    # 影像檔查詢區的「圖片檢視」浮動視窗：整張圖、放大縮小、移動、旋轉（只影響顯示）
+    ImageViewerPanel(ui=ui, app_state=app_state, url_for=lambda path: served_url(nicegui_app.add_static_file, path)).build()
     build_tab_shell(ui, app_state, _tab_specs())
 
 

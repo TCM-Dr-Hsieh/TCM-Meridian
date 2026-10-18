@@ -466,8 +466,10 @@ class PatientSessionLifecycleController:
 
     def clear_patient_ui(self):
         self.refs["patient_select"].value = None
-        self.refs["session_select"].value = None
-        self.refs["session_select"].options = []
+        # set_options sends the emptied lists to the browser; assigning `options` alone changes only the server's copy, and the date
+        # dropdown went on listing the visits of the patient that was left
+        self.refs["session_select"].set_options([], value=None)
+        self.refs["template_select"].set_options(["（空白病歷）"], value="（空白病歷）")
         self.refs["patient_info_label"].content = ""
         self.refs["remark_area"].value = ""
         self.refs["remark_status"].text = ""
@@ -519,6 +521,9 @@ class PatientSessionLifecycleController:
 
     def on_confirm_session(self):
         if self._reject_if_busy():
+            return
+        if not self.app_state.get("selected_patient_folder"):            # a date with no patient would leave the page half open
+            self.refs["session_status"].text = "⚠️ 請先選取患者"
             return
         dt = self.refs["session_select"].value
         if not dt:

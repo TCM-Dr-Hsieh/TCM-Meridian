@@ -47,6 +47,11 @@ class Loose:
     def __init__(self, value=None, options=None):
         self.value, self.options, self.text, self.content = value, options if options is not None else [], "", ""
 
+    def set_options(self, options, *, value=...):                    # as NiceGUI's select: the options, and the value if given
+        self.options = options
+        if value is not ...:
+            self.value = value
+
     def __getattr__(self, name):
         return lambda *args, **kwargs: None
 

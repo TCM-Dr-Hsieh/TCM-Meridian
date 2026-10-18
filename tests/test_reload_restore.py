@@ -232,6 +232,9 @@ def test_the_connection_is_kept_for_a_minute_so_a_short_outage_does_not_reload_t
     source = (ROOT / "TCM_Meridian_main.py").read_text(encoding="utf-8")
     assert "reconnect_timeout=RECONNECT_SECONDS" in source and 'os.environ.get("TCM_RECONNECT_SECONDS", "60")' in source
     assert "last_selection=last_selection_store" in source and "register_leave_warning(ui, app_state)" in source
+    assert "restore_selection=nicegui_app.is_started" in source                     # not in the run NiceGUI makes before any browser connects
+    controller_source = (ROOT / "ui_app" / "controllers" / "medical_main_controller.py").read_text(encoding="utf-8")
+    assert "    if restore_selection:\n        patient_session_controller.restore_last_selection()" in controller_source
     ignored = (ROOT / ".gitignore").read_text(encoding="utf-8")
     assert "last_session.json" in ignored                                    # the memory file is the physician's, not the repository's
 

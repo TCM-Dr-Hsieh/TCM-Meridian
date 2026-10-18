@@ -131,6 +131,12 @@ def build_medical_main_layout(ui: Any, today: str) -> dict[str, Any]:
                 .classes("w-full q-mt-xs")
                 .tooltip("開啟語音功能視窗：錄音並即時辨識診間對話（可拖動；關閉視窗不會停止錄音）")
             )
+            refs["btn_record_lookup"] = (
+                ui.button("📖 查閱病歷", color="blue-grey")
+                .props("dense outline no-caps")
+                .classes("w-full q-mt-xs")
+                .tooltip("開啟查閱病歷視窗：唯讀瀏覽這位患者其他日期的病歷（可拖動，右下角可調整大小）")
+            )
 
             with ui.column().classes("w-full q-mt-sm") as new_session_panel:
                 refs["new_session_date"] = ui.input(label="日期 (YYYY-MM-DD)", value=today).classes("w-full")

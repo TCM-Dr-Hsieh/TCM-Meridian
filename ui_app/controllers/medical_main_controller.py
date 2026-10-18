@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from agent_behavior_log import append_behavior_event
+from ui_app.controllers.record_lookup_panel import APP_STATE_KEY as RECORD_LOOKUP_KEY
 from ui_app.controllers.agent_run_state_controller import get_agent_run_state
 from ui_app.controllers.live_steps_controller import LiveStepsController
 from ui_app.controllers.interview_state_controller import get_interview_state
@@ -52,6 +53,7 @@ def build_medical_main_tab(
     get_last_visit_content: Callable[[str, str], str],
     generate_history_summary: Callable[[str, str], str],
     last_selection: Any | None = None,
+    restore_selection: bool = True,
 ):
     history = SnapshotHistory()
     app_state["history"] = history
@@ -101,6 +103,11 @@ def build_medical_main_tab(
         voice_controller.bind_button(refs["btn_voice"])
     else:
         refs["btn_voice"].disable()
+    record_lookup = app_state.get(RECORD_LOOKUP_KEY)
+    if record_lookup is not None:
+        record_lookup.bind_button(refs["btn_record_lookup"])
+    else:
+        refs["btn_record_lookup"].disable()
     main_chat_input = MainChatInputController(app_state=app_state, btn_send=btn_send)
     app_state["_main_chat_input"] = main_chat_input
     quick_prompt_controller = QuickPromptController(
@@ -458,4 +465,5 @@ def build_medical_main_tab(
     btn_expand_chat.on_click(on_expand_chat)
     _refresh_patient_list()
     _update_buttons()
-    patient_session_controller.restore_last_selection()      # a reloaded page returns to the visit that was open
+    if restore_selection:
+        patient_session_controller.restore_last_selection()      # a reloaded page returns to the visit that was open

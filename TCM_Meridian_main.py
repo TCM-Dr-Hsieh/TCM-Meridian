@@ -32,6 +32,7 @@ from ui_app.controllers.patient_controller import build_patient_registration_tab
 from ui_app.controllers.professor_controller import build_professor_settings_tab
 from ui_app.controllers.tab_controller import TabController
 from ui_app.controllers.template_controller import build_record_template_tab
+from ui_app.controllers.record_lookup_panel import RecordLookupPanel
 from ui_app.controllers.record_reference_panel import RecordReferencePanel
 from ui_app.controllers.voice_controller import VoiceController
 from ui_app.services.config_service import load_json_config, save_json_config
@@ -402,6 +403,9 @@ def build_ui():
     register_leave_warning(ui, app_state)
     # 修改病歷時的「參考版本」浮動視窗（顯示帶來源標籤的原文）同理放在分頁之外
     RecordReferencePanel(ui=ui, app_state=app_state).build()
+    # 「查閱病歷」浮動視窗：唯讀瀏覽這位患者其他日期的病歷（左欄按鈕在主介面分頁建立時綁定）
+    RecordLookupPanel(ui=ui, app_state=app_state, list_sessions=list_sessions, get_session_summaries=get_session_summaries,
+                      load_session_content=load_session_content).build()
     build_tab_shell(ui, app_state, _tab_specs())
 
 
@@ -442,6 +446,9 @@ def _build_medical_main_tab():
         get_last_visit_content=get_last_visit_content,
         generate_history_summary=generate_history_summary,
         last_selection=last_selection_store,
+        # 只在真的有瀏覽器連進來的頁面還原：程式啟動時 NiceGUI 會先在沒有任何連線的情況下把本腳本跑一遍（伺服器尚未啟動），
+        # 那一遍沒有頁面可操作，還原會在元件上出錯
+        restore_selection=nicegui_app.is_started,
     )
 
 

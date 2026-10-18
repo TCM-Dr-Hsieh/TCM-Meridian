@@ -45,6 +45,15 @@ CSS = '''
 .lc-note {background:#fff1c9; border-radius:3px; padding:0 2px; font-weight:700;}
 .lc-note .lc-why {color:#9a6a00; font-size:12px; font-weight:400;}
 .ref-label {font-weight:700; color:#1b4332; font-size:13px; margin-top:8px;}
+/* The 查閱病歷 window: the visits as a list, the record as the main page's browse box shows it. */
+.lookup-dates {gap:2px; margin:6px 0 4px; max-height:30%; min-height:44px; overflow:auto; flex-wrap:nowrap;
+               border:1px solid #e0e8e3; border-radius:8px; padding:4px;}
+.lookup-date {width:100%; justify-content:flex-start; text-align:left; color:#1b4332; font-size:13px;}
+.lookup-date.lookup-chosen {background:#dcebe3; font-weight:700;}
+.lookup-date.lookup-open {color:#a7b3ad !important; opacity:1 !important;}
+.lookup-heading {font-weight:700; color:#2d6a4f; font-size:14px; margin-top:6px;}
+.lookup-text {padding:10px 12px; background:#fafafa; border:1px solid #e8e8e8; border-radius:8px; white-space:pre-wrap;
+              overflow-wrap:anywhere; font-size:14px; line-height:1.7; user-select:text; cursor:text; margin-top:4px;}
 /* The replay window (voice/web/replay.js) is a float-panel built in the browser. */
 .replay-panel {resize:both;}
 .replay-body {flex:1 1 0; min-height:0; overflow:auto; padding:10px 14px; display:flex; flex-direction:column; gap:8px; font-size:14px;}
@@ -118,9 +127,12 @@ window.tcmFloat = (function () {
            width: parseFloat(el.style.width) || DEFAULT_W, height: parseFloat(el.style.height) || 400};
     }
     if (!(s && s.width > 0)) {
-      s = {width: parseFloat(el.dataset.defaultW) || DEFAULT_W,
+      const defaultW = parseFloat(el.dataset.defaultW) || DEFAULT_W;
+      s = {width: defaultW,
            height: parseFloat(el.dataset.defaultH) || Math.min(window.innerHeight * 0.7, 640),
-           left: window.innerWidth - (parseFloat(el.dataset.defaultW) || DEFAULT_W) - (parseFloat(el.dataset.defaultRight) || 24), top: 96};
+           left: el.dataset.defaultLeft !== undefined ? parseFloat(el.dataset.defaultLeft)
+                 : window.innerWidth - defaultW - (parseFloat(el.dataset.defaultRight) || 24),
+           top: 96};
     }
     // sized to the window, then pulled fully into view where it fits (the saved place may come from a bigger window)
     const w = Math.min(s.width, window.innerWidth - 20), h = Math.min(s.height, window.innerHeight - 20);

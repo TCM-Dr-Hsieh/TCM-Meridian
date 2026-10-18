@@ -152,5 +152,8 @@ def test_the_examples_name_record_items_by_what_they_hold_not_by_one_templates_n
     for name in ("main", "record", "hallucination", "lc", "nr", "prompt_information_collection_subagent.txt"):
         assert not numbering.search(read(name)), name
     assert "實際有哪些項目以【標準病歷格式】為準" in read("main")
-    assert "一律以下方【標準病歷格式】為準；格式裡沒有的項目不要列入補問" in read("nr")
+    nr = read("nr")
+    assert "不得僅因範例出現某項目，就額外要求補問或新增欄位" in nr
+    assert "已取得但尚未登載的相關臨床資訊，仍依上述規則提醒，歸入格式中適當的既有項目" in nr   # rules 5-8 still hold
+    assert "也不要提醒登載" not in nr
     assert "項目名稱、編號與順序照【標準病歷格式】" in read("record")

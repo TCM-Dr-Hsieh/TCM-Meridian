@@ -19,6 +19,7 @@ from ui_app.controllers.patient_session_lifecycle_controller import PatientSessi
 from ui_app.rendering import simple_md_render, strip_citations
 
 APP_STATE_KEY = "_record_lookup"
+VISITS_CHANGED_KEY = "_on_visits_changed"      # called by the main page whenever the visits of the open patient change
 EMPTY = '<span style="color:#aaa;">（空白）</span>'
 
 
@@ -50,6 +51,7 @@ class RecordLookupPanel:
         self.listed_for: tuple[str | None, str | None] = (None, None)
         self.date_buttons: dict[str, Any] = {}
         app_state[APP_STATE_KEY] = self
+        app_state[VISITS_CHANGED_KEY] = self.visits_changed
 
     # ------------------------------------------------------------------ building
     def build(self) -> None:
@@ -105,18 +107,24 @@ class RecordLookupPanel:
         if self.opened and self.selection() != self.listed_for:
             self.refresh()
 
+    def visits_changed(self) -> None:
+        """A visit of the open patient was added or deleted, or its summary changed (the main page refreshed its visit list): the
+        list is made again, and a shown visit that is gone is cleared. A closed window is made again when it opens."""
+        if self.opened:
+            self.refresh()
+
     def refresh(self) -> None:
         folder, current = self.selection()
         self.listed_for = (folder, current)
-        if self.shown is not None and (self.shown[0] != folder or self.shown[1] == current):
-            self.clear_record()                          # another patient's record, or the visit that is open now
+        dates = sorted(self.list_sessions(folder), reverse=True) if folder else []
+        if self.shown is not None and (self.shown[0] != folder or self.shown[1] == current or self.shown[1] not in dates):
+            self.clear_record()                          # another patient's, the visit that is open now, or a visit that was deleted
         self.w.dates.clear()
         self.date_buttons = {}
         with self.w.dates:
             if not folder:
                 self.ui.label("請先在左欄選取並確認患者。").classes("hint")
                 return
-            dates = sorted(self.list_sessions(folder), reverse=True)
             if not dates:
                 self.ui.label("這位患者還沒有任何就診紀錄。").classes("hint")
                 return

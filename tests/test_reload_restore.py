@@ -300,3 +300,16 @@ def test_the_filter_works_on_the_log_record_and_is_installed_once(tmp_path):
     assert str(collected.records[0].exc_info[1]) == DROPPED_PAGE_MESSAGE                                 # ... the same words from the program's own code are kept
     assert "program" in str(collected.records[0].exc_info[2].tb_next.tb_frame.f_code.co_filename)
     assert "install_dropped_page_filter()" in (ROOT / "TCM_Meridian_main.py").read_text(encoding="utf-8")
+
+
+def test_the_main_page_says_so_whenever_it_remakes_the_visit_list(tmp_path):
+    controller, state, refs, _ = make_controller(tmp_path)
+    calls = []
+    state["_on_visits_changed"] = lambda: calls.append(state.get("selected_patient_folder"))
+    refs["patient_select"].value = FOLDER_A
+    controller.on_confirm_patient()                                          # another patient: the list is made again
+    controller.refresh_session_list()                                        # what adding, deleting and summarising a visit call
+    state["selected_patient_folder"] = None
+    controller.refresh_session_list()                                        # no patient: told as well
+    assert calls == [FOLDER_A, FOLDER_A, None]
+

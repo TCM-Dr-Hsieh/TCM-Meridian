@@ -1,6 +1,6 @@
 """The 查閱病歷 window: the other visits of the open patient, read only, as the browse mode shows them. No browser: a fake NiceGUI that
 keeps the element tree, so the list of visits and what is shown can be looked at."""
-from ui_app.controllers.record_lookup_panel import APP_STATE_KEY, EMPTY, RecordLookupPanel, browse_html
+from ui_app.controllers.record_lookup_panel import APP_STATE_KEY, EMPTY, VISITS_CHANGED_KEY, RecordLookupPanel, browse_html
 
 FOLDER_A, FOLDER_B = "patient_data/A1", "patient_data/B2"
 RECORDS = {
@@ -112,20 +112,21 @@ class Button:
             handler()
 
 
-def make(folder=FOLDER_A, current="2026-10-16"):
+def make(folder=FOLDER_A, current="2026-10-16", records=None):
+    records = RECORDS if records is None else records
     ui = FakeUI()
     state = {"selected_patient_folder": folder, "selected_session_date": current}
     loads = []
 
     def list_sessions(f):
-        return sorted({date for (owner, date) in RECORDS if owner == f})            # oldest first, as the store gives them
+        return sorted({date for (owner, date) in records if owner == f})            # oldest first, as the store gives them
 
     def load_session_content(f, date):
         loads.append((f, date))
-        return RECORDS.get((f, date), {"note": "", "at": ""})
+        return records.get((f, date), {"note": "", "at": ""})
 
     panel = RecordLookupPanel(ui=ui, app_state=state, list_sessions=list_sessions,
-                              get_session_summaries=lambda f, date: {"note_summary": RECORDS[(f, date)]["note"].split("：", 1)[1][:4]},
+                              get_session_summaries=lambda f, date: {"note_summary": records[(f, date)]["note"].split("：", 1)[1][:4]},
                               load_session_content=load_session_content)
     panel.build()
     button = Button()
@@ -201,3 +202,31 @@ def test_a_closed_window_does_not_rebuild_its_list_until_it_is_opened(tmp_path=N
     assert panel.w.dates.children == []                                            # closed: nothing is done every second
     button.press()
     assert dict(dates(panel))["2026-10-08（頭痛改善）　目前開啟"] is False           # opened: made for the selection of now
+
+
+def test_a_deleted_visit_leaves_the_list_and_what_was_shown_of_it_is_cleared(tmp_path=None):
+    records = dict(RECORDS)
+    panel, ui, state, button, _ = make(records=records)
+    button.press()
+    panel.w.dates.children[2].click()                                              # showing 2026-10-01
+    assert panel.shown == (FOLDER_A, "2026-10-01")
+    del records[(FOLDER_A, "2026-10-01")]                                          # the physician deletes that visit on the main page ...
+    state[VISITS_CHANGED_KEY]()                                                    # ... which remakes its visit list and says so
+    assert "2026-10-01" not in " ".join(text for text, _ in dates(panel))
+    assert panel.shown is None and panel.w.note_html.content == "" and panel.w.heading.text.startswith("點選上方")
+
+
+def test_a_visit_deleted_while_the_window_was_closed_is_not_shown_when_it_opens(tmp_path=None):
+    records = dict(RECORDS)
+    panel, ui, state, button, _ = make(records=records)
+    button.press()
+    panel.w.dates.children[1].click()                                              # showing 2026-10-08
+    button.press()                                                                 # closed
+    del records[(FOLDER_A, "2026-10-08")]
+    state[VISITS_CHANGED_KEY]()                                                    # a closed window does nothing now ...
+    button.press()                                                                 # ... and is made for the visits of now when it opens
+    assert panel.shown is None and panel.w.note_html.content == ""
+    assert [text for text, _ in dates(panel)] == ["2026-10-16（今天的病）　目前開啟", "2026-10-01（頭痛三天）"]
+    records[(FOLDER_A, "2026-10-18")] = {"note": "甲- 現病史：新的一次", "at": ""}     # a visit added: it shows up
+    state[VISITS_CHANGED_KEY]()
+    assert dates(panel)[0] == ("2026-10-18（新的一次）", True)

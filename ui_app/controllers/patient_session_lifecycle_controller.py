@@ -173,6 +173,7 @@ class PatientSessionLifecycleController:
             session_select.options = []
             session_select.update()
             self._sync_busy_navigation()
+            self._visits_changed()
             return
         dates = self.list_sessions(fp)
         session_options = {}
@@ -184,6 +185,13 @@ class PatientSessionLifecycleController:
         session_select.update()
         template_select.update()
         self._sync_busy_navigation()
+        self._visits_changed()
+
+    def _visits_changed(self):
+        """Tell whoever follows the visits of this patient (the 查閱病歷 window) that the list was just made again."""
+        callback = self.app_state.get("_on_visits_changed")
+        if callback:
+            callback()
 
     def on_save_remark(self):
         if self._reject_if_busy():

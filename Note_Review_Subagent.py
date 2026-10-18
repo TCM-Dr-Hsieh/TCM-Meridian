@@ -1,6 +1,6 @@
 """
 Note_Review_Subagent.py - 病歷檢查員 Subagent
-對照標準病歷格式（甲～癸），逐項掃描 NOTE 欄位的完整性，
+對照標準病歷格式，逐項掃描 NOTE 欄位的完整性，
 找出尚未完成的項目，並統整出「資訊蒐集方針」。
 """
 from __future__ import annotations
@@ -36,7 +36,7 @@ class NoteReviewSubagent:
     """
     病歷檢查員 Subagent。
 
-    對照標準病歷格式（甲～癸），逐項掃描 NOTE 欄位的完整性，
+    對照標準病歷格式，逐項掃描 NOTE 欄位的完整性，
     找出尚未完成的項目，並統整出「資訊蒐集方針」交給問診助理去補問。
 
     使用方式：
@@ -96,7 +96,7 @@ class NoteReviewSubagent:
         behavior_context: dict | None = None,
     ) -> dict[str, Any]:
         """
-        掃描 NOTE 欄位的甲～癸完整性。
+        對照標準病歷格式，掃描 NOTE 欄位的完整性。
 
         Args:
             note_content: 當前 NOTE 內容

@@ -143,3 +143,14 @@ def test_the_review_contract_fixes_are_in_the_prompts():
     assert "不要自行縮小範圍" in main and "方針自己寫成的局部更新不會被採信" in main
     assert "稍微口乾" not in main
     assert "方針範圍與症狀追問的分工" in read("prompt_information_collection_subagent.txt")
+
+
+def test_the_examples_name_record_items_by_what_they_hold_not_by_one_templates_numbering():
+    # the physician rewrites the standard record template; examples numbered after an old one sent the checker after items that
+    # were no longer there
+    numbering = re.compile(r"(?<![一-龥])[甲乙丙丁戊己庚辛壬癸](?:-|\.\d+)")
+    for name in ("main", "record", "hallucination", "lc", "nr", "prompt_information_collection_subagent.txt"):
+        assert not numbering.search(read(name)), name
+    assert "實際有哪些項目以【標準病歷格式】為準" in read("main")
+    assert "一律以下方【標準病歷格式】為準；格式裡沒有的項目不要列入補問" in read("nr")
+    assert "項目名稱、編號與順序照【標準病歷格式】" in read("record")

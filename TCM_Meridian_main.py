@@ -40,6 +40,7 @@ from ui_app.services.config_service import load_json_config, save_json_config
 from ui_app.services.app_services import create_app_services
 from ui_app.shell import TabSpec, build_header, build_tab_shell
 from ui_app.leave_warning import register_leave_warning
+from ui_app.console_output import tolerate_unencodable_output
 from ui_app.log_filters import install_dropped_page_filter
 from ui_app.services.last_selection import LastSelectionStore
 from ui_app.voice_assets import register_voice_web
@@ -63,6 +64,7 @@ last_selection_store = LastSelectionStore(os.path.join(CURRENT_DIR, "last_sessio
 # 連線斷掉後伺服器替頁面保留多久（NiceGUI 預設 3 秒，經 Cloudflare 等通道容易超過而整頁重載、狀態歸零）。TCM_RECONNECT_SECONDS 可調。
 RECONNECT_SECONDS = float(os.environ.get("TCM_RECONNECT_SECONDS", "60") or 60)
 install_dropped_page_filter()      # 從未連線的頁面（探測、爬蟲）逾時刪除時，NiceGUI 計時器會各報一次無害的 traceback；只濾掉這一種
+tolerate_unencodable_output()      # 輸出導到檔案時（cp950）遇到編碼不了的字改寫成 \uXXXX，不讓 Agent 印 log 時出錯中斷
 
 # ════════════════════════════════════════════════════════════════
 # 全域應用狀態 (跨分頁共享)

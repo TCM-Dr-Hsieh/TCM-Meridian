@@ -83,12 +83,87 @@ async def test_an_unexpected_error_is_shown_like_a_failed_step_instead_of_reopen
     assert not made.refs["btn_send"].enabled                                        # sending the reply again would record it twice
 
 
-def test_a_page_restored_while_the_assistant_owed_an_answer_offers_the_retry():
+def test_a_page_restored_while_the_assistant_owed_its_next_step_offers_the_retry():
     made = controller(Voice(clock=40.0), Assistant(answer_from=10.0))
     asked = [{"role": "subagent", "content": "哪裡不舒服？", "round": 1}]
-    made.load_history_ui("方針", asked + [{"role": "patient", "content": "頭痛", "round": 1}], 1, active=True)
-    assert made.refs["btn_retry"].visible and not made.refs["btn_send"].enabled and "還沒回應" in made.refs["status"].text
+    made.load_history_ui("方針", asked + [{"role": "patient", "content": "頭痛", "round": 1}], 1, active=True, awaiting_assistant=True)
+    assert made.refs["btn_retry"].visible and not made.refs["btn_send"].enabled and "還沒完成下一步" in made.refs["status"].text
     made.load_history_ui("方針", asked, 1, active=True)                              # waiting for the physician: reply as usual
     assert not made.refs["btn_retry"].visible and made.refs["btn_send"].enabled
-    made.load_history_ui("方針", asked + [{"role": "patient", "content": "頭痛", "round": 1}], 1, active=False)
-    assert not made.refs["btn_retry"].visible                                       # a finished interview has nothing to retry
+    made.load_history_ui("方針", asked, 1, active=False, awaiting_assistant=True)    # a finished interview has nothing to retry
+    assert not made.refs["btn_retry"].visible
+
+
+class Shown:
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, guidelines, conversations, total, *, active=False, awaiting_assistant=False):
+        self.calls.append({"conversations": conversations, "active": active, "awaiting": awaiting_assistant})
+
+
+def restore(state):
+    from ui_app.controllers.session_state_restorer import SessionStateRestorer
+    app_state, ui_state = {}, {"chat_messages": []}
+    shown = app_state["_load_interview_ui"] = Shown()
+    restorer = SessionStateRestorer(
+        app_state=app_state, ui_state=ui_state, load_config=lambda: {"ic_subagent": CONFIG}, load_chat_state=lambda *a: None,
+        load_interview_state=lambda *a: state, load_forum_state=lambda *a: [], save_chat_state=lambda *a: None,
+        agent_factory=SimpleNamespace(create_information_collection_agent_if_configured=InformationCollectionSubagent),
+        render_chat=lambda: None)
+    waiting = SimpleNamespace(_suspended={"step": "Turn 2-1"}, export_state=dict)   # the Main Agent waits for this interview
+    restorer.agent_run_state.set_agent(waiting)
+    restorer.restore_interview_state("patient_data/A", DATE)
+    return restorer, shown, waiting
+
+
+def test_an_interview_whose_first_question_failed_is_restored_waiting_for_the_retry():
+    started = InformationCollectionSubagent(CONFIG)
+    started.client = Model(ConnectionError("timeout"))
+    assert started.start_collection(guidelines="問頭痛", log_callback=lambda m: None)["action"] == "error"
+    state = started.export_state()
+    assert state["active"] and state["all_conversations"] == []                     # nothing to show, but the interview is on
+    restorer, shown, waiting = restore(state)
+    assert restorer.interview_state.is_active() and waiting._suspended                # neither the interview nor the Main Agent dropped
+    assert shown.calls == [{"conversations": [], "active": True, "awaiting": True}]
+    restorer.interview_state.get_subagent().client = Model(QUESTION)
+    assert restorer.interview_state.get_subagent().retry_turn(log_callback=lambda m: None)["action"] == "ask_patient"
+
+
+def test_whether_the_assistant_owes_a_step_is_read_from_this_interview_not_the_earlier_ones_of_the_visit():
+    earlier = [{"role": "subagent", "content": "q", "round": 1, "step": "Turn 1-1"},
+               {"role": "patient", "content": "a", "round": 1, "step": "Turn 1-1"}]
+    base = {"active": True, "finished": False, "dialogue_round": 1, "guidelines": "g", "all_conversations": earlier}
+    _, shown, _ = restore({**base, "conversation": []})                               # a second interview, its first question failed
+    assert shown.calls[-1]["awaiting"] is True
+    asked = earlier + [{"role": "subagent", "content": "q2", "round": 2, "step": "Turn 2-1"}]
+    _, shown, _ = restore({**base, "all_conversations": asked, "conversation": asked[2:]})   # its question is on the screen
+    assert shown.calls[-1]["awaiting"] is False
+    _, shown, waiting = restore({**base, "active": False, "finished": True, "conversation": []})  # a finished one is just shown
+    assert shown.calls[-1] == {"conversations": earlier, "active": False, "awaiting": False} and waiting._suspended is None
+
+
+async def test_a_double_click_on_retry_runs_one_step_and_a_later_step_keeps_its_own_guard():
+    import asyncio
+    import threading
+    assistant = Failing()
+    gate, calls = threading.Event(), []
+
+    def slow_retry(**kwargs):
+        calls.append(kwargs)
+        gate.wait(5)
+        assistant.dialogue_round += 1
+        return {"action": "ask_patient", "message": "頭痛多久了？", "round": assistant.dialogue_round, "finished": False}
+
+    assistant.retry_turn = slow_retry
+    made = controller(Voice(clock=40.0), assistant)
+    first = asyncio.ensure_future(made.retry_assistant())
+    await asyncio.sleep(0.05)
+    await asyncio.wait_for(made.retry_assistant(), 1)                                # the second click returns at once
+    gate.set()
+    await first
+    assert len(calls) == 1 and assistant.dialogue_round == 4 and made._assistant_step is None
+    mine, later = object(), object()
+    made._assistant_step = later
+    made._release(mine)                                                               # an earlier call finishing late
+    assert made._assistant_step is later

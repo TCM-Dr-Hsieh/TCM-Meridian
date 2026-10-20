@@ -49,6 +49,10 @@ class AutoInterviewController:
         self.interview_state = get_interview_state(app_state)
         self.refs: dict[str, Any] = {}
         self._voice_answer_open = False          # one voice-answer window at a time (a double click opened two for the same round)
+        # One step of the assistant at a time (a double click on 重試 ran two model calls and both changed the conversation). The step
+        # is owned by the call that took it and only that call releases it: a later interview started while the Main Agent resumes
+        # takes its own.
+        self._assistant_step: object | None = None
 
     def _next_ic_run_id(self) -> int:
         run_id = int(self.app_state.get("_ic_run_id", 0)) + 1
@@ -263,7 +267,23 @@ class AutoInterviewController:
         if not ic_sub:
             status.text = "⚠️ 問診助理尚未啟動"
             return
+        if self._assistant_step is not None:
+            return
+        step = self._assistant_step = object()
+        try:
+            await self._submit(ic_sub, answer, voice=voice, answered_at=answered_at, step=step)
+        finally:
+            self._release(step)
 
+    def _release(self, step: object):
+        if self._assistant_step is step:
+            self._assistant_step = None
+
+    async def _submit(self, ic_sub, answer: str, *, voice: dict | None, answered_at: float | None, step: object):
+        app_state = self.app_state
+        status = self.refs["status"]
+        fp = app_state.get("selected_patient_folder")
+        dt = app_state.get("selected_session_date")
         if fp and dt:
             ic_sub.behavior_context = {"folder_path": fp, "date_str": dt}
 
@@ -301,6 +321,7 @@ class AutoInterviewController:
             dt,
             run_id=run_id,
             rollback_point=rollback_point,
+            step=step,
         )
 
     async def retry_assistant(self):
@@ -313,6 +334,16 @@ class AutoInterviewController:
             self.refs["status"].text = "⚠️ 問診助理尚未啟動"
             self._show_retry(False)
             return
+        if self._assistant_step is not None:     # a second click before the first one's button went away: one model call, not two
+            return
+        step = self._assistant_step = object()
+        try:
+            await self._retry(ic_sub, fp, dt, step=step)
+        finally:
+            self._release(step)
+
+    async def _retry(self, ic_sub, fp: str | None, dt: str | None, *, step: object):
+        app_state = self.app_state
         if fp and dt:
             ic_sub.behavior_context = {"folder_path": fp, "date_str": dt}
         run_id = self._next_ic_run_id()
@@ -338,13 +369,18 @@ class AutoInterviewController:
             dt,
             run_id=run_id,
             rollback_point=rollback_point,
+            step=step,
         )
 
-    async def _run_assistant(self, call: Callable[[], dict], fp: str | None, dt: str | None, *, run_id: int, rollback_point: dict):
+    async def _run_assistant(self, call: Callable[[], dict], fp: str | None, dt: str | None, *, run_id: int, rollback_point: dict,
+                             step: object):
         """Run one step of the assistant off the web loop and show what it did. A result that arrives after the interview was stopped or
         moved on is discarded; an unexpected error is shown like a failed step (the reply is kept, the physician retries or stops)."""
         try:
-            result = await asyncio.get_event_loop().run_in_executor(None, call)
+            try:
+                result = await asyncio.get_event_loop().run_in_executor(None, call)
+            finally:
+                self._release(step)              # the assistant's step is over; resuming the Main Agent is not part of it
             if not self._is_current_ic_run(run_id):
                 if not self.interview_state.is_active():
                     self.rollback_interrupted_interview(
@@ -507,6 +543,7 @@ class AutoInterviewController:
         total_rounds: int,
         *,
         active: bool = False,
+        awaiting_assistant: bool = False,
     ):
         if self.refs.get("guidelines_label"):
             self.refs["guidelines_label"].text = guidelines or "（方針已載入）"
@@ -520,10 +557,10 @@ class AutoInterviewController:
         self._show_retry(False)
         if self.refs.get("btn_stop"):
             self.refs["btn_stop"].disable()
-        if active and conversations and conversations[-1].get("role") == "patient":
-            # the last reply never got the assistant's next step (it failed, or the page went away while it was thinking)
+        if active and awaiting_assistant:
+            # the assistant owes its next step: the first question, or the answer to the last reply (it failed, or the page went away)
             if self.refs.get("status"):
-                self.refs["status"].text = f"問診進行中（R{total_rounds}），問診助理還沒回應上一則回覆：請按「🔁 重試」或手動停止"
+                self.refs["status"].text = "問診進行中，問診助理還沒完成下一步（上次失敗，或頁面在它思考時離開）：請按「🔁 重試」或手動停止"
             self._show_retry(True)
             if self.refs.get("btn_stop"):
                 self.refs["btn_stop"].enable()
@@ -911,6 +948,8 @@ class AutoInterviewController:
         if container:
             container.clear()
 
+        self._show_retry(False)
+        self._set_reply_enabled(False)
         self.refs["status"].text = "⏳ 問診助理思考中..."
 
         hist = self.app_state.get("history")

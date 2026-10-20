@@ -60,10 +60,11 @@ class SessionStateRestorer:
 
     def restore_interview_state(self, fp: str, dt: str):
         iv_data = self.load_interview_state(fp, dt)
-        if iv_data and iv_data.get("all_conversations"):
-            all_convs = iv_data["all_conversations"]
+        is_active = bool(iv_data and iv_data.get("active")) and not bool(iv_data.get("finished"))
+        # An interview that is going on is restored even without a single message: its first question failed and waits for a retry.
+        if iv_data and (iv_data.get("all_conversations") or is_active):
+            all_convs = iv_data.get("all_conversations") or []
             guidelines_text = iv_data.get("guidelines", "")
-            is_active = bool(iv_data.get("active")) and not bool(iv_data.get("finished"))
 
             self._restore_ic_subagent(iv_data)
 
@@ -76,8 +77,12 @@ class SessionStateRestorer:
                 if main_chat_input:
                     main_chat_input.unlock("agent_running")
                     main_chat_input.lock("interview_active")
+                # this interview's own messages (not the earlier interviews of the visit): nothing yet, or a reply last, means the
+                # assistant owes the next step (it failed, or the page went away while it was thinking)
+                cycle = iv_data.get("conversation") or []
+                awaiting = not cycle or cycle[-1].get("role") == "patient"
                 if load_interview_fn:
-                    load_interview_fn(guidelines_text, all_convs, total, active=True)
+                    load_interview_fn(guidelines_text, all_convs, total, active=True, awaiting_assistant=awaiting)
             else:
                 self.interview_state.finish(format_interview_conversations(all_convs))
                 if load_interview_fn:

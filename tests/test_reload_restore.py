@@ -239,7 +239,11 @@ def test_the_connection_is_kept_for_a_minute_so_a_short_outage_does_not_reload_t
     assert "last_selection=last_selection_store" in source and "register_leave_warning(ui, app_state)" in source
     assert "restore_selection=nicegui_app.is_started" in source                     # not in the run NiceGUI makes before any browser connects
     controller_source = (ROOT / "ui_app" / "controllers" / "medical_main_controller.py").read_text(encoding="utf-8")
-    assert "    if restore_selection:\n        patient_session_controller.restore_last_selection()" in controller_source
+    assert 'app_state["_restore_last_selection"] = patient_session_controller.restore_last_selection' in controller_source
+    assert "patient_session_controller.restore_last_selection()" not in controller_source   # not while the main tab is half built
+    # run once every tab exists: an interview that was going on is shown in its own tab, which is built after the main one
+    build = source[source.index("def build_ui():"):source.index("def _build_medical_main_tab():")]
+    assert build.index("build_tab_shell(ui, app_state, _tab_specs())") < build.index('restore = app_state.pop("_restore_last_selection", None)')
     ignored = (ROOT / ".gitignore").read_text(encoding="utf-8")
     assert "last_session.json" in ignored                                    # the memory file is the physician's, not the repository's
 

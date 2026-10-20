@@ -410,6 +410,10 @@ def build_ui():
     # 影像檔查詢區的「圖片檢視」浮動視窗：整張圖、放大縮小、移動、旋轉（只影響顯示）
     ImageViewerPanel(ui=ui, app_state=app_state, url_for=lambda path: served_url(nicegui_app.add_static_file, path)).build()
     build_tab_shell(ui, app_state, _tab_specs())
+    # 重新整理後回到上次開啟的看診：等所有分頁都建好再還原（進行中的自動問診要顯示在它自己的分頁，那個分頁比主介面晚建立）
+    restore = app_state.pop("_restore_last_selection", None)
+    if restore is not None:
+        restore()
 
 
 # ════════════════════════════════════════════════════════════════

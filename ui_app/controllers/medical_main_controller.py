@@ -466,4 +466,6 @@ def build_medical_main_tab(
     _refresh_patient_list()
     _update_buttons()
     if restore_selection:
-        patient_session_controller.restore_last_selection()      # a reloaded page returns to the visit that was open
+        # A reloaded page returns to the visit that was open, but only once every tab exists (build_ui runs it last): an interview that
+        # was going on is shown in its own tab, built after this one; restored before it, the interview was on but its tab stayed empty.
+        app_state["_restore_last_selection"] = patient_session_controller.restore_last_selection

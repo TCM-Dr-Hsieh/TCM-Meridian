@@ -37,7 +37,7 @@ from .config import VoiceSettings, resolve_path
 from .corrector import TranscriptCorrector
 from .fileio import atomic_write_json, atomic_write_text
 from .llm import LLMCaller, LLMClient
-from .pipeline import TranscriptPipeline
+from .pipeline import AnswerWindow, TranscriptPipeline
 from .remote import RemoteAudioSource
 from .speaker.embedder import load_embedder
 from .speaker.service import SpeakerService
@@ -537,6 +537,27 @@ class VoiceManager:
         if pipeline is None or not any(s.visible for s in pipeline.segments):
             return ''
         return pipeline.snapshot().text
+
+    def audio_clock(self, folder: str | None, date: str | None) -> float | None:
+        """How far the recording of this session goes now, in seconds: the live clock while it records, the end of the file otherwise,
+        0.0 when it has no recording yet. None when the voice part cannot be used for it (another session is being recorded)."""
+        if not folder or not date:
+            return None
+        try:
+            session = self.attach(folder, date)       # idempotent; refused only while a recording of another session runs
+        except VoiceError:
+            return None
+        return session.audio_t() or 0.0
+
+    def answer_window(self, folder: str | None, date: str | None, start: float, end: float) -> AnswerWindow | None:
+        """What was said in [start, end) of this session's recording (one interview round asked aloud), and whether the recognition has
+        caught up with `end`. None when the voice part cannot be used for this session. Call it on the web loop, like `snapshot_text`."""
+        if self.audio_clock(folder, date) is None:
+            return None
+        pipeline = self.session.pipeline
+        if pipeline is None:                            # nothing recorded and nothing recognized: an empty stretch, nothing on its way
+            return AnswerWindow(start, end, [], True, 0.0)
+        return pipeline.answer_window(start, end)
 
     def recording_position(self, folder: str | None = None, date: str | None = None) -> tuple[float | None, bool]:
         """(where the transcript handed out ends, paused), in seconds of the recording: the `截至 mm:ss` of a snapshot. It is not the length

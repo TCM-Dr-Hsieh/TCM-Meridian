@@ -5,9 +5,15 @@ import os
 from datetime import datetime
 from typing import Any, Callable
 
+from Information_Collection_Subagent import VOICE_ANSWER_MARK, voice_answer_content
 from ui_app.controllers.agent_run_state_controller import get_agent_run_state
 from ui_app.controllers.interview_state_controller import get_interview_state
 from ui_app.rendering import build_conversation_text
+from voice.textutil import format_clock
+
+# How long the voice-answer window waits for the recognition to reach the moment the button was pressed before it lets the physician
+# send what is there (the windows are a few seconds long; recognition and correction take a few more).
+VOICE_WAIT_SECONDS = 30.0
 
 
 class AutoInterviewController:
@@ -87,6 +93,9 @@ class AutoInterviewController:
 
                 with ui.row().classes("w-full gap-3 items-center"):
                     btn_send = ui.button("📤 送出回覆", color="primary").style("font-size: 14px;")
+                    btn_voice = ui.button("🎙 從逐字稿取回答", color="primary").props("outline").style("font-size: 14px;").tooltip(
+                        "把這回合的問題口頭問完後按這裡：取這段時間的錄音逐字稿當作回答（這個就診要正在錄音或已有錄音）"
+                    )
                     btn_stop = ui.button("⏹ 終止問診", color="red").props("outline").style("font-size: 14px;")
                     status = ui.label("").style("font-size: 13px; color: #666;")
 
@@ -96,11 +105,12 @@ class AutoInterviewController:
             "chat_card": chat_card,
             "reply_input": reply_input,
             "btn_send": btn_send,
+            "btn_voice": btn_voice,
             "btn_stop": btn_stop,
             "status": status,
         }
 
-        btn_send.disable()
+        self._set_reply_enabled(False)
         btn_stop.disable()
 
         app_state["_ic_add_message"] = self.add_message
@@ -114,82 +124,11 @@ class AutoInterviewController:
             if not answer:
                 status.text = "⚠️ 請輸入回覆內容"
                 return
-
-            fp = app_state.get("selected_patient_folder")
-            dt = app_state.get("selected_session_date")
-            ic_sub = self.interview_state.get_subagent()
-            if not ic_sub:
-                status.text = "⚠️ 問診助理尚未啟動"
-                return
-
-            if fp and dt:
-                ic_sub.behavior_context = {"folder_path": fp, "date_str": dt}
-
-            run_id = self._next_ic_run_id()
-            rollback_point = dict(app_state.get("_ic_rollback_point") or {})
-
-            self.add_message("patient", answer, ic_sub.dialogue_round)
             reply_input.value = ""
-            btn_send.disable()
-            status.text = "⏳ 問診助理思考中..."
+            await self.submit_answer(answer)
 
-            hist = app_state.get("history")
-            current = hist.get_current() if hist else None
-            note_content = current["note"] if current else ""
-            at_content = current["at"] if current else ""
-
-            def log_cb(msg):
-                if fp and dt:
-                    self.write_session_log(fp, dt, msg)
-
-            try:
-                result = await asyncio.get_event_loop().run_in_executor(
-                    None,
-                    lambda: ic_sub.receive_answer(
-                        patient_input=answer,
-                        note_content=note_content,
-                        at_content=at_content,
-                        log_callback=log_cb,
-                    ),
-                )
-                if not self._is_current_ic_run(run_id):
-                    if not self.interview_state.is_active():
-                        self.rollback_interrupted_interview(
-                            fp,
-                            dt,
-                            rollback_point=rollback_point,
-                            write_log=False,
-                        )
-                    if fp and dt:
-                        self.write_session_log(
-                            fp,
-                            dt,
-                            "[IC_STALE_RESULT] Discarded information-collection result after stop/cancel.",
-                        )
-                    return
-                completed = self.handle_result(result, fp, dt)
-                if completed:
-                    await self.resume_agent_after_interview(fp, dt)
-            except Exception as e:
-                if not self._is_current_ic_run(run_id):
-                    if not self.interview_state.is_active():
-                        self.rollback_interrupted_interview(
-                            fp,
-                            dt,
-                            rollback_point=rollback_point,
-                            write_log=False,
-                        )
-                    if fp and dt:
-                        self.write_session_log(
-                            fp,
-                            dt,
-                            f"[IC_STALE_ERROR] Discarded information-collection error after stop/cancel: {e}",
-                        )
-                    return
-                status.text = f"❌ 問診助理錯誤：{e}"
-                btn_send.enable()
-                if fp and dt:
-                    self.write_session_log(fp, dt, f"[IC_ERROR] {e}")
+        async def on_ic_voice():
+            await self.answer_from_transcript()
 
         async def on_ic_stop():
             ic_sub = self.interview_state.get_subagent()
@@ -202,7 +141,7 @@ class AutoInterviewController:
             else:
                 self.interview_state.stop()
             status.text = "⏹ 問診已手動終止"
-            btn_send.disable()
+            self._set_reply_enabled(False)
             btn_stop.disable()
 
             agent = self.agent_run_state.get_agent()
@@ -272,7 +211,204 @@ class AutoInterviewController:
                     behavior_render()
 
         btn_send.on_click(on_ic_send)
+        btn_voice.on_click(on_ic_voice)
         btn_stop.on_click(on_ic_stop)
+
+    def _set_reply_enabled(self, enabled: bool):
+        """The two ways to answer a round (typed, or asked aloud and taken from the transcript) are open and shut together."""
+        for key in ("btn_send", "btn_voice"):
+            button = self.refs.get(key)
+            if button is not None:
+                (button.enable if enabled else button.disable)()
+
+    def _audio_clock(self, fp: str | None, dt: str | None) -> float | None:
+        voice_manager = self.app_state.get("_voice_manager")
+        return voice_manager.audio_clock(fp, dt) if voice_manager is not None and fp and dt else None
+
+    def _transcript(self, fp: str | None, dt: str | None) -> str:
+        voice_manager = self.app_state.get("_voice_manager")
+        return voice_manager.snapshot_text(fp, dt) if voice_manager is not None and fp and dt else ""
+
+    async def submit_answer(self, answer: str, *, voice: dict | None = None, answered_at: float | None = None):
+        """Hand one round's reply to the interview assistant (typed, or the pointer of a round asked aloud) with the transcript as it stands
+        now, and show what it does next. The next voice answer is counted from this moment of the recording."""
+        app_state = self.app_state
+        status = self.refs["status"]
+        fp = app_state.get("selected_patient_folder")
+        dt = app_state.get("selected_session_date")
+        ic_sub = self.interview_state.get_subagent()
+        if not ic_sub:
+            status.text = "⚠️ 問診助理尚未啟動"
+            return
+
+        if fp and dt:
+            ic_sub.behavior_context = {"folder_path": fp, "date_str": dt}
+
+        run_id = self._next_ic_run_id()
+        rollback_point = dict(app_state.get("_ic_rollback_point") or {})
+        if answered_at is None:
+            answered_at = self._audio_clock(fp, dt)
+        if answered_at is not None:
+            ic_sub.answer_from = answered_at
+        voice_transcript = self._transcript(fp, dt)
+
+        self.add_message("patient", answer, ic_sub.dialogue_round)
+        self._set_reply_enabled(False)
+        status.text = "⏳ 問診助理思考中..."
+
+        hist = app_state.get("history")
+        current = hist.get_current() if hist else None
+        note_content = current["note"] if current else ""
+        at_content = current["at"] if current else ""
+
+        def log_cb(msg):
+            if fp and dt:
+                self.write_session_log(fp, dt, msg)
+
+        try:
+            result = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: ic_sub.receive_answer(
+                    patient_input=answer,
+                    note_content=note_content,
+                    at_content=at_content,
+                    log_callback=log_cb,
+                    voice=voice,
+                    voice_transcript=voice_transcript,
+                ),
+            )
+            if not self._is_current_ic_run(run_id):
+                if not self.interview_state.is_active():
+                    self.rollback_interrupted_interview(
+                        fp,
+                        dt,
+                        rollback_point=rollback_point,
+                        write_log=False,
+                    )
+                if fp and dt:
+                    self.write_session_log(
+                        fp,
+                        dt,
+                        "[IC_STALE_RESULT] Discarded information-collection result after stop/cancel.",
+                    )
+                return
+            completed = self.handle_result(result, fp, dt)
+            if completed:
+                await self.resume_agent_after_interview(fp, dt)
+        except Exception as e:
+            if not self._is_current_ic_run(run_id):
+                if not self.interview_state.is_active():
+                    self.rollback_interrupted_interview(
+                        fp,
+                        dt,
+                        rollback_point=rollback_point,
+                        write_log=False,
+                    )
+                if fp and dt:
+                    self.write_session_log(
+                        fp,
+                        dt,
+                        f"[IC_STALE_ERROR] Discarded information-collection error after stop/cancel: {e}",
+                    )
+                return
+            status.text = f"❌ 問診助理錯誤：{e}"
+            self._set_reply_enabled(True)
+            if fp and dt:
+                self.write_session_log(fp, dt, f"[IC_ERROR] {e}")
+
+    async def answer_from_transcript(self):
+        """The physician asked this round aloud: the stretch of the recording from the previous reply to now is the answer. A small window
+        waits for the recognition to reach this moment, shows the lines, takes an optional typed addition, and sends a pointer to them."""
+        app_state = self.app_state
+        status = self.refs["status"]
+        fp = app_state.get("selected_patient_folder")
+        dt = app_state.get("selected_session_date")
+        ic_sub = self.interview_state.get_subagent()
+        if not ic_sub or not self.interview_state.is_active():
+            status.text = "⚠️ 問診助理尚未啟動"
+            return
+        end = self._audio_clock(fp, dt)
+        if end is None:
+            status.text = "⚠️ 語音功能目前不能用於這個就診（可能正在錄另一個就診）"
+            return
+        if end <= 0:
+            status.text = "⚠️ 這個就診還沒有錄音：請先在「語音功能」開始錄音，口頭問完再按"
+            return
+        start = min(ic_sub.answer_from or 0.0, end)          # set when the first question appeared, moved by every reply
+        picked = await self._voice_answer_dialog(fp, dt, start, end, ic_sub.dialogue_round)
+        if picked is None:
+            return
+        supplement, window = picked
+        content = voice_answer_content(window.first, window.last, start, end, caught_up=window.caught_up, supplement=supplement)
+        voice = {"first": window.first, "last": window.last, "start": start, "end": end}
+        await self.submit_answer(content, voice=voice, answered_at=end)
+
+    async def _voice_answer_dialog(self, fp: str, dt: str, start: float, end: float, round_num: int):
+        """(the typed addition, the final window), or None when the physician goes back to asking."""
+        ui = self.ui
+        voice_manager = self.app_state.get("_voice_manager")
+        state: dict[str, Any] = {"lines": None, "waited": 0.0}
+
+        with ui.dialog().props("persistent") as dialog, ui.card().style("min-width: 560px; max-width: 820px;"):
+            ui.label(f"🎙 R{round_num} 語音回答").style("font-weight: 700; font-size: 16px;")
+            ui.label(f"本回合區間 {format_clock(start)}–{format_clock(end)}：從上一次回覆送出到按下按鈕。"
+                     "問診紀錄只記錄這段逐字稿的位置，病歷直接引用逐字稿。").style("font-size: 13px; color: #666;")
+            wait_label = ui.label("").style("font-size: 13px;")
+            lines_box = ui.column().classes("w-full gap-1").style(
+                "max-height: 320px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; padding: 8px;"
+            )
+            supplement = ui.textarea(
+                label="補充或更正（選填，照一般打字回覆記錄）",
+                placeholder="例如：語音把「沒有夜尿」聽成「有夜尿」；或實習醫師量到的數值",
+            ).classes("w-full")
+            with ui.row().classes("w-full justify-end gap-2"):
+                ui.button("取消（繼續問）", on_click=lambda: dialog.submit(None)).props("flat")
+                btn_ok = ui.button("送出", color="primary", on_click=lambda: dialog.submit((supplement.value or "").strip()))
+
+            def refresh():
+                window = voice_manager.answer_window(fp, dt, start, end) if voice_manager is not None else None
+                if window is None:
+                    wait_label.text = "⚠️ 語音功能目前不能用於這個就診；可以只送出下方的打字內容，或取消"
+                    btn_ok.enable()
+                    timer.deactivate()
+                    return
+                if window.lines != state["lines"]:
+                    state["lines"] = list(window.lines)
+                    lines_box.clear()
+                    with lines_box:
+                        if not window.lines:
+                            ui.label("（這段時間還沒有辨識到對話）").style("color: #999; font-size: 13px;")
+                        for _, line in window.lines:
+                            ui.label(line).style("font-size: 13px; white-space: pre-wrap;")
+                if window.caught_up:
+                    wait_label.text = (f"✅ 辨識已跟上，共 {len(window.lines)} 段" if window.lines
+                                       else "✅ 辨識已跟上：這段時間沒有辨識到對話")
+                    btn_ok.enable()
+                    timer.deactivate()
+                    return
+                state["waited"] += timer.interval
+                wait_label.text = f"⏳ 辨識中…逐字稿目前到 {format_clock(window.reach)}，要等到 {format_clock(end)}"
+                if state["waited"] >= VOICE_WAIT_SECONDS:
+                    wait_label.text += "。等比較久了，可以先送出目前的段落（較晚辨識出的段落仍屬於本回合，之後的 Agent 看得到）"
+                    btn_ok.enable()
+                else:
+                    btn_ok.disable()
+
+            timer = ui.timer(0.5, refresh)
+        refresh()
+        dialog.open()
+        try:
+            picked = await dialog
+        finally:
+            timer.deactivate()
+            dialog.delete()
+        if picked is None:
+            return None
+        window = voice_manager.answer_window(fp, dt, start, end) if voice_manager is not None else None
+        if window is None:
+            from voice.pipeline import AnswerWindow
+            window = AnswerWindow(start, end, [], False, 0.0)
+        return picked, window
 
     def clear_ui(self):
         if self.refs.get("chat_container"):
@@ -281,8 +417,7 @@ class AutoInterviewController:
             self.refs["guidelines_label"].text = "（尚未啟動問診助理）"
         if self.refs.get("status"):
             self.refs["status"].text = ""
-        if self.refs.get("btn_send"):
-            self.refs["btn_send"].disable()
+        self._set_reply_enabled(False)
         if self.refs.get("btn_stop"):
             self.refs["btn_stop"].disable()
         if self.refs.get("reply_input"):
@@ -304,15 +439,13 @@ class AutoInterviewController:
                 self.add_message(msg["role"], msg["content"], msg.get("round", 0))
         if self.refs.get("status"):
             self.refs["status"].text = f"📂 已載入先前問診紀錄 (共 {total_rounds} 回合)。如需繼續問診請重新啟動。"
-        if self.refs.get("btn_send"):
-            self.refs["btn_send"].disable()
+        self._set_reply_enabled(False)
         if self.refs.get("btn_stop"):
             self.refs["btn_stop"].disable()
         if active:
             if self.refs.get("status"):
                 self.refs["status"].text = f"問診進行中，已恢復至 R{total_rounds}，請繼續回答或手動停止"
-            if self.refs.get("btn_send"):
-                self.refs["btn_send"].enable()
+            self._set_reply_enabled(True)
             if self.refs.get("btn_stop"):
                 self.refs["btn_stop"].enable()
         self._scroll_chat_to_bottom()
@@ -325,6 +458,9 @@ class AutoInterviewController:
         if role == "subagent":
             bg = "#e8f5e9"
             label_prefix = f"🤖 問診助理 R{round_num}"
+        elif content.startswith(VOICE_ANSWER_MARK):
+            bg = "#e3f2fd"
+            label_prefix = f"🎙 語音回答 R{round_num}"
         else:
             bg = "#e3f2fd"
             label_prefix = f"👤 回覆 R{round_num}"
@@ -356,23 +492,26 @@ class AutoInterviewController:
         if action == "ask_patient" and not finished:
             self.add_message("subagent", message, round_num)
             self.refs["status"].text = f"📋 問診中 (R{round_num})"
-            self.refs["btn_send"].enable()
+            self._set_reply_enabled(True)
             self.refs["btn_stop"].enable()
 
             ic_sub = self.interview_state.get_subagent()
+            if ic_sub is not None and ic_sub.answer_from is None:
+                # the first question of this interview is on the screen: its voice answer is counted from here
+                ic_sub.answer_from = self._audio_clock(fp, dt)
             if ic_sub and fp and dt:
                 self.save_interview_state(fp, dt, ic_sub.export_state())
             return False
 
         if finished or action == "finish_collection":
             self.refs["status"].text = f"✅ 問診完成 (共 {round_num} 回合)"
-            self.refs["btn_send"].disable()
+            self._set_reply_enabled(False)
             self.refs["btn_stop"].disable()
             self.finalize_interview(fp, dt)
             return True
 
         self.refs["status"].text = f"⚠️ 未預期的動作: {action}"
-        self.refs["btn_send"].disable()
+        self._set_reply_enabled(False)
         self.refs["btn_stop"].disable()
         self.finalize_interview(fp, dt)
         return True
@@ -705,6 +844,7 @@ class AutoInterviewController:
         forum_history_text = ""
         if agent and hasattr(agent, "_format_forum_history"):
             forum_history_text = agent._format_forum_history()
+        voice_transcript = self._transcript(fp, dt)          # the assistant reads the room's conversation too: no need to ask it again
 
         try:
             result = await asyncio.get_event_loop().run_in_executor(
@@ -719,6 +859,7 @@ class AutoInterviewController:
                     forum_history=forum_history_text,
                     log_callback=log_cb,
                     behavior_context={"folder_path": fp, "date_str": dt},
+                    voice_transcript=voice_transcript,
                 ),
             )
             completed = self.handle_result(result, fp, dt)

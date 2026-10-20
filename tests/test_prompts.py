@@ -39,14 +39,13 @@ def test_prompts_filled_by_replace_hold_no_placeholder_nobody_fills(name, known)
     assert found <= known, found - known
 
 
-def test_every_agent_that_reads_the_transcript_is_told_about_it_and_the_interview_and_professors_are_not():
-    for name in ("main", "record", "hallucination", "lc", "nr"):
+def test_every_agent_that_reads_the_transcript_is_told_about_it_and_the_professors_are_not():
+    for name in ("main", "record", "hallucination", "lc", "nr", "prompt_information_collection_subagent.txt"):
         assert "診間對話逐字稿" in read(name), name
     for name in ("record", "hallucination", "lc"):
         text = read(name)
         assert "[語音#N]" in text and "[語音#N-M]" in text and "[語音#N, #M]" in text, name
         assert "11 種" in text or name == "record", name
-    assert "逐字稿" not in read("prompt_information_collection_subagent.txt")
     for professor_prompt in ROOT.glob("professor*/**/*.txt"):
         assert "診間對話逐字稿" not in professor_prompt.read_text(encoding="utf-8", errors="ignore"), professor_prompt
 
@@ -157,3 +156,17 @@ def test_the_examples_name_record_items_by_what_they_hold_not_by_one_templates_n
     assert "已取得但尚未登載的相關臨床資訊，仍依上述規則提醒，歸入格式中適當的既有項目" in nr   # rules 5-8 still hold
     assert "也不要提醒登載" not in nr
     assert "項目名稱、編號與順序照【標準病歷格式】" in read("record")
+
+
+def test_a_round_answered_aloud_is_read_in_the_transcript_and_cited_from_it():
+    # the interview assistant reads the transcript every round and finds the answers of a round asked aloud there
+    ic = read("prompt_information_collection_subagent.txt")
+    assert "〔語音回答〕" in ic and "〔另外輸入〕" in ic and "不要當成患者已回答" in ic and "【音訊可能缺漏】" in ic
+    assert "請再確認" in ic and "可以直接唸給患者聽" in ic
+    # the agents that cite or check sources: a pointer holds no facts, the transcript does
+    assert "不可標成 `[問診紀錄_患者R3]` 這類問診紀錄標籤" in read("record")
+    for name in ("hallucination", "lc"):
+        text = read(name)
+        assert "〔語音回答〕" in text and "〔另外輸入〕" in text and "回應本身不含臨床內容" in text, name
+    assert "標成問診紀錄標籤屬於標註錯誤" in read("hallucination")
+    assert "〔語音回答〕" in read("nr") and "〔語音回答〕" in read("main")

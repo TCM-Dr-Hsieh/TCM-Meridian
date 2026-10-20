@@ -12,6 +12,7 @@ from typing import Any, Callable, Optional
 from openai import OpenAI
 import model_json
 from agent_behavior_log import append_behavior_event
+from voice.textutil import format_clock
 
 # ════════════════════════════════════════════════════════════════
 # Prompt 載入
@@ -28,6 +29,30 @@ def _load_prompt(filename: str) -> str:
 # ════════════════════════════════════════════════════════════════
 # Information Collection Subagent 類別
 # ════════════════════════════════════════════════════════════════
+
+VOICE_ANSWER_MARK = "〔語音回答〕"
+TYPED_SUPPLEMENT_MARK = "〔另外輸入〕"
+
+
+def voice_answer_content(first: int | None, last: int | None, start: float, end: float, *, caught_up: bool = True,
+                         supplement: str = "") -> str:
+    """The reply of a round the physician asked aloud: a pointer to the stretch of the transcript, never a retelling of it. A retelling
+    would turn a speech-recognition guess into an `[問診紀錄_…]` source, and it would fall behind the transcript's own later corrections;
+    the facts are cited from the transcript as `[語音#N]`. What the physician types besides (a correction, a value) is a typed reply as usual."""
+    stretch = f"{format_clock(start)}–{format_clock(end)}"
+    if first is None:
+        text = f"{VOICE_ANSWER_MARK}醫師已口頭詢問本回合的問題，但 {stretch} 這段時間的【診間對話逐字稿】沒有辨識到對話。"
+    else:
+        numbers = f"語音#{first}" if first == last else f"語音#{first} 至 #{last}"
+        text = (f"{VOICE_ANSWER_MARK}醫師已口頭詢問本回合的問題，回答在【診間對話逐字稿】{numbers}（{stretch}），"
+                f"此處不轉述內容；其中的事實一律引用 [語音#N]。")
+    if not caught_up:
+        text += f"（送出時這段時間的音訊還沒全部辨識完：{stretch} 之間較晚才出現的段落也屬於本回合。）"
+    supplement = (supplement or "").strip()
+    if supplement:
+        text += f"\n{TYPED_SUPPLEMENT_MARK}{supplement}"
+    return text
+
 
 def format_interview_dialogue(conversations: list[dict]) -> str:
     """The interview as the other agents read it (「完整問診對話紀錄」). The one formatter of it: the live finish of an interview and the
@@ -123,6 +148,10 @@ class InformationCollectionSubagent:
         self.behavior_context: dict | None = None
         # 是否已完成問診
         self.finished: bool = False
+        # 診間對話逐字稿：UI 每回合（啟動與每次回覆）取一份最新的快照交給問診助理
+        self.voice_transcript: str = ""
+        # 下一個回答從錄音的哪一秒開始算（上一次回覆送出的時間；第一回合是問題出現的時間）；隨 session 保存與還原
+        self.answer_from: float | None = None
 
     # ════════════════════════════════════════════════════════════
     # 公開介面
@@ -139,6 +168,7 @@ class InformationCollectionSubagent:
         forum_history: str = "",
         log_callback: Optional[Callable[[str], None]] = None,
         behavior_context: dict | None = None,
+        voice_transcript: str = "",
     ) -> dict:
         """
         啟動問診循環，產生第一個問題。
@@ -152,6 +182,7 @@ class InformationCollectionSubagent:
             history_summary: 歷史病歷摘要
             forum_history: 醫療問答討論區的問答紀錄
             log_callback: 選用，日誌回呼函式
+            voice_transcript: 診間對話逐字稿（此刻的快照；沒有錄音時為空字串）
 
         Returns:
             {
@@ -169,12 +200,14 @@ class InformationCollectionSubagent:
         self.interaction_history = interaction_history
         self.forum_history = forum_history
         self.behavior_context = behavior_context
+        self.voice_transcript = voice_transcript or ""
 
         # 重置當前循環狀態（跨循環狀態保留）
         self.conversation = []
         self.turn_count = 0
         self.turn_history = []
         self.finished = False
+        self.answer_from = None
 
         # 建立 system prompt（注入歷史資訊與模板）
         self.system_prompt = self.system_prompt_template.replace(
@@ -196,15 +229,19 @@ class InformationCollectionSubagent:
         note_content: str = "",
         at_content: str = "",
         log_callback: Optional[Callable[[str], None]] = None,
+        voice: dict | None = None,
+        voice_transcript: str | None = None,
     ) -> dict:
         """
         接收患者回答，記錄到 conversation，然後呼叫 LLM 產生下一個問題或結束。
 
         Args:
-            patient_input: 患者的回答內容
+            patient_input: 患者的回答內容（語音回答時是 `voice_answer_content` 的指標文字）
             note_content: 當前 NOTE 內容
             at_content: 當前 ASSESSMENT & TREATMENT 內容
             log_callback: 選用，日誌回呼函式
+            voice: 語音回答的區間 {"first", "last", "start", "end"}（打字回覆時為 None）
+            voice_transcript: 診間對話逐字稿（此刻的快照；None 時沿用上一份）
 
         Returns:
             {
@@ -215,6 +252,8 @@ class InformationCollectionSubagent:
                 "finished": bool,
             }
         """
+        if voice_transcript is not None:
+            self.voice_transcript = voice_transcript
         # 將患者回答記錄到對話歷史（使用當前的 dialogue_round）
         patient_msg = {
             "role": "patient",
@@ -222,6 +261,8 @@ class InformationCollectionSubagent:
             "round": self.dialogue_round,
             "step": self.current_step,
         }
+        if voice:
+            patient_msg["voice"] = dict(voice)
         self.conversation.append(patient_msg)
         self.all_conversations.append(patient_msg)
         if self.behavior_context:
@@ -296,6 +337,8 @@ class InformationCollectionSubagent:
         self.guidelines = ""
         self.system_prompt = ""
         self.finished = False
+        self.voice_transcript = ""
+        self.answer_from = None
 
     # ── 狀態序列化（Session 持久化用）──
 
@@ -314,6 +357,7 @@ class InformationCollectionSubagent:
             "system_prompt": self.system_prompt,
             "interaction_history": self.interaction_history,
             "forum_history": self.forum_history,
+            "answer_from": self.answer_from,
         }
 
     def restore_state(self, state: dict):
@@ -329,6 +373,7 @@ class InformationCollectionSubagent:
         self.system_prompt = state.get("system_prompt", "")
         self.interaction_history = state.get("interaction_history", "")
         self.forum_history = state.get("forum_history", "")
+        self.answer_from = state.get("answer_from")
 
     # ════════════════════════════════════════════════════════════
     # 內部方法
@@ -427,6 +472,11 @@ ASSESSMENT & TREATMENT:
 
         current_input += f"""## 【本次循環的問診對話過程】
 {conversation_text if conversation_text else '（空白）'}
+"""
+
+        # 診間對話逐字稿（每回合最新的快照）：語音回答的內容就在這裡
+        current_input += f"""## 【診間對話逐字稿】
+{self.voice_transcript if self.voice_transcript else '（空白）'}
 """
 
         current_input += "請根據以上資訊，決定下一步動作。輸出 JSON。"

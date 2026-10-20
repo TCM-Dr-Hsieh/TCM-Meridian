@@ -72,6 +72,24 @@ class TranscriptSnapshot:
     marked: bool = False   # the lines carry speaker marks
 
 
+@dataclass
+class AnswerWindow:
+    """The transcript of one stretch of the recording: what was said while one round of the interview was asked aloud."""
+    start: float
+    end: float
+    lines: list[tuple[int, str]]   # (segment number, the line as the agents read it), in order
+    caught_up: bool                # all the audio up to `end` has been recognized: nothing said in the stretch is still on its way
+    reach: float                   # how far the recognized audio goes (silence and failed windows included)
+
+    @property
+    def first(self) -> int | None:
+        return self.lines[0][0] if self.lines else None
+
+    @property
+    def last(self) -> int | None:
+        return self.lines[-1][0] if self.lines else None
+
+
 def gap_marker(start: float, end: float) -> str:
     return f'【音訊可能缺漏 {format_clock(start)}–{format_clock(end)}】'
 
@@ -173,6 +191,20 @@ class TranscriptPipeline:
         last = max((s.index for s in self.segments if s.visible), default=0)
         return TranscriptSnapshot(f'{header}\n{lines}' if lines else f'{header}\n（尚無逐字稿內容）',
                                   lines, upto, last, len(self.segments), unlocked, pending, marked)
+
+    def answer_window(self, start: float, end: float) -> AnswerWindow:
+        """The lines of the segments that cover any of [start, end) of the recording, and whether the audio up to `end` has all been
+        recognized. `committed_end` moves past silence and failed windows too, so a quiet stretch still catches up; a finished transcript
+        has nothing more coming. A segment that straddles a boundary belongs to both stretches: an overlap of one segment loses nothing."""
+        marked = self._marked()
+        lines = []
+        for segment in self.segments:
+            if segment.visible and segment.end > start and segment.new_start < end:
+                line = self.line(segment, marked)
+                if line:                              # a segment of nothing but background voices has no line
+                    lines.append((segment.index, line))
+        caught_up = self.finished or self.committed_end >= end
+        return AnswerWindow(start, end, lines, caught_up, max(self.committed_end, 0.0))
 
     def line(self, segment: Segment, marked: bool = False, keep_background: bool = False) -> str:
         """One transcript line; with `marked`, the text carries the speaker marks (`醫師: … -> 患者或家屬: …`) when it has any. Background

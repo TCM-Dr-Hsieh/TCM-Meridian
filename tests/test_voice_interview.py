@@ -127,7 +127,7 @@ class Thing:
     """A widget: chains, nests, and remembers whether it is enabled."""
 
     def __init__(self):
-        self.text, self.value, self.enabled = "", "", True
+        self.text, self.value, self.enabled, self.visible = "", "", True, True
 
     def __getattr__(self, name):
         return lambda *args, **kwargs: self
@@ -143,6 +143,9 @@ class Thing:
 
     def disable(self):
         self.enabled = False
+
+    def set_visibility(self, visible):
+        self.visible = visible
 
 
 class Voice:
@@ -164,7 +167,8 @@ class Assistant:
 
     def receive_answer(self, **kwargs):
         self.received.append(kwargs)
-        return {"action": "ask_patient", "message": "下一題", "round": 4, "finished": False}
+        self.dialogue_round += 1                                                  # the next question is a new round
+        return {"action": "ask_patient", "message": "下一題", "round": self.dialogue_round, "finished": False}
 
     def export_state(self):
         return {}
@@ -179,7 +183,7 @@ def controller(voice, assistant):
         Thing(), app_state, load_config=dict, write_session_log=lambda *a: None, save_chat_state=lambda *a: None,
         save_interview_state=lambda *a: None, save_forum_state=lambda *a: None, save_conversation_file=lambda *a: None,
         get_last_visit_content=lambda *a: "", load_history_summary=lambda *a: "", agent_factory=None)
-    made.refs = {key: Thing() for key in ("status", "btn_send", "btn_voice", "btn_stop", "chat_container", "reply_input")}
+    made.refs = {key: Thing() for key in ("status", "btn_send", "btn_voice", "btn_retry", "btn_stop", "chat_container", "reply_input")}
     state = get_interview_state(app_state)
     state.set_subagent(assistant)
     state.start(assistant)
@@ -240,3 +244,34 @@ def test_the_first_question_on_the_screen_starts_the_first_voice_answer():
     assert assistant.answer_from == 42.0 and made.refs["btn_voice"].enabled           # later rounds start where the last reply was sent
     made.handle_result({"action": "finish_collection", "message": "", "round": 2, "finished": True}, None, None)
     assert not made.refs["btn_send"].enabled and not made.refs["btn_voice"].enabled
+
+
+async def test_one_voice_answer_window_at_a_time_and_nothing_is_sent_for_a_round_that_moved_on(monkeypatch):
+    assistant = Assistant(answer_from=120.0)
+    made = controller(Voice(clock=185.0), assistant)
+    release, opened = asyncio.Event(), []
+
+    async def dialog(fp, dt, start, end, round_num):
+        opened.append(round_num)
+        await release.wait()
+        return "", AnswerWindow(start, end, [(41, "語音#41 …")], True, 186.0)
+
+    monkeypatch.setattr(made, "_voice_answer_dialog", dialog)
+    first = asyncio.ensure_future(made.answer_from_transcript())
+    await asyncio.sleep(0)
+    await asyncio.wait_for(made.answer_from_transcript(), 1)                         # a second click while the window is open: no window
+    assert opened == [3]
+    release.set()
+    await first
+    assert len(assistant.received) == 1 and assistant.dialogue_round == 4            # R3 answered once; R4 is on the screen
+    release.clear()
+
+    async def moved_on(fp, dt, start, end, round_num):                                 # the round moves on while the window is open
+        assistant.dialogue_round += 1
+        made._next_ic_run_id()
+        return "", AnswerWindow(start, end, [(50, "語音#50 …")], True, 200.0)
+
+    monkeypatch.setattr(made, "_voice_answer_dialog", moved_on)
+    await made.answer_from_transcript()
+    assert len(assistant.received) == 1 and "這份語音回答沒有送出" in made.refs["status"].text
+    assert made._voice_answer_open is False                                           # the window can be opened again

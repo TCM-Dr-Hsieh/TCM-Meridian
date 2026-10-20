@@ -283,6 +283,18 @@ class InformationCollectionSubagent:
         # 執行下一輪
         return self._execute_turn(note_content, at_content, log_callback)
 
+    def retry_turn(
+        self,
+        note_content: str = "",
+        at_content: str = "",
+        log_callback: Optional[Callable[[str], None]] = None,
+        voice_transcript: str | None = None,
+    ) -> dict:
+        """Run the step that failed once more: the reply it was answering is already in the conversation, nothing is added."""
+        if voice_transcript is not None:
+            self.voice_transcript = voice_transcript
+        return self._execute_turn(note_content, at_content, log_callback)
+
     def get_full_dialogue(self) -> str:
         """
         取得完整問診對話紀錄（格式化文字）。
@@ -524,14 +536,7 @@ ASSESSMENT & TREATMENT:
             except Exception as e:
                 error_msg = f"Info Collection Subagent LLM 呼叫失敗：{e}"
                 _log(f"[Info Collection Subagent] ❌ {error_msg}")
-                self.finished = True
-                return {
-                    "action": "finish_collection",
-                    "message": f"（問診助理 LLM 呼叫失敗：{e}）",
-                    "round": self.dialogue_round,
-                    "thinking": "",
-                    "finished": True,
-                }
+                return self._failed(f"問診助理模型呼叫失敗：{e}")
 
             # 記錄輸出
             attempt_label = f" (重試 {attempt})" if attempt > 0 else ""
@@ -611,15 +616,7 @@ ASSESSMENT & TREATMENT:
                 raise ValueError("找不到 JSON")
         except Exception as e:
             _log(f"[Info Collection Subagent] JSON 解析失敗：{e}")
-            # 解析失敗時結束問診循環，用原始輸出作為結果
-            self.finished = True
-            return {
-                "action": "finish_collection",
-                "message": f"（問診助理輸出解析失敗）\n{output[:2000]}",
-                "round": self.dialogue_round,
-                "thinking": "",
-                "finished": True,
-            }
+            return self._failed(f"問診助理的輸出無法解析（已重試 {self.MAX_JSON_RETRIES} 次）")
 
         action = parsed.get("action", "")
         action_input = parsed.get("action_input", "")
@@ -697,16 +694,28 @@ ASSESSMENT & TREATMENT:
             }
 
         else:
-            # 未知動作，當作 finish_collection 處理
-            _log(
-                f"[Info Collection Subagent] 未知動作: {action}，"
-                f"視為 finish_collection"
+            _log(f"[Info Collection Subagent] 未知動作: {action}")
+            return self._failed(f"問診助理回了不認得的動作「{action}」")
+
+    def _failed(self, message: str) -> dict:
+        """This step did not produce a question or an end (the model call failed, its output could not be read, or it named an action that
+        does not exist). The interview stays open: every reply sent so far is kept, and `retry_turn` runs the step again. It is never
+        reported as a finished interview."""
+        if self.behavior_context:
+            append_behavior_event(
+                self.behavior_context.get("folder_path"),
+                self.behavior_context.get("date_str"),
+                agent="information_collection_subagent",
+                event_type="model_error",
+                label=f"失敗T{self.turn_count}",
+                title=f"問診助理 Turn {self.turn_count} 失敗",
+                content=message,
+                severity="error",
             )
-            self.finished = True
-            return {
-                "action": "finish_collection",
-                "message": f"（未知動作 {action}）\n{action_input}",
-                "round": self.dialogue_round,
-                "thinking": thinking,
-                "finished": True,
-            }
+        return {
+            "action": "error",
+            "message": message,
+            "round": self.dialogue_round,
+            "thinking": "",
+            "finished": False,
+        }

@@ -327,7 +327,8 @@ Recordings and transcripts live in the patient folder (`patient_data/` is exclud
     "rerank": {
       "api_url": "http://localhost:1234/v1",
       "api_key": "lm-studio",
-      "model_name": ""
+      "model_name": "",
+      "max_concurrency": 1
     }
   }
 }
@@ -341,9 +342,9 @@ The Main Agent submodels `main_agent.history_summary` and `main_agent.summary_ex
 
 Detection strengths (`hallucination_subagent.detection_strength`, `lc_subagent.detection_strength`) set to `0` enable research control mode, meaning the corresponding check is bypassed. Values greater than `0` are clamped to the valid range. The Model Settings page blocks empty values, negative values, and detection strengths larger than their maximum review/scan rounds.
 
-Blank fields and explicit `0` are handled separately: numeric fields on the Model Settings and Professor Settings pages fall back to defaults only when **cleared**. Fields that allow `0` preserve it, such as `temperature=0` for deterministic output; positive-only fields including `max_rounds`, `react_history_prompt_chars`, and `graffiti_summarize_threshold` are clamped to at least 1.
+Blank fields and explicit `0` are handled separately: numeric fields on the Model Settings and Professor Settings pages fall back to defaults only when **cleared**. Fields that allow `0` preserve it, such as `temperature=0` for deterministic output; positive-only fields including `max_rounds`, `react_history_prompt_chars`, `graffiti_summarize_threshold`, and `rerank.max_concurrency` are clamped to at least 1.
 
-Professor ReAct/RAG is configured separately for answer generation, embedding, three-prefix classification, and reranking models. `max_rounds` controls the maximum ReAct rounds per professor consultation (default 15), and `max_retrievals_per_answer` controls the maximum knowledge-base retrieval calls per answer (default 3; `0` disables retrieval for that professor answer and forces the professor to use its own knowledge, the context visible to that call, and patient files). The Professor Settings page also exposes `react_history_prompt_chars` (default 5000; when the complete work history exceeds this value, only its latest segment is inserted into the prompt) and `graffiti_summarize_threshold` (default 8000; exceeding it asks the professor to summarize the graffiti wall but does not automatically truncate it). If the model still reports context overflow after work-history truncation, the professor answer fails closed and is not written to the forum.
+Professor ReAct/RAG is configured separately for answer generation, embedding, three-prefix classification, and reranking models. `max_rounds` controls the maximum ReAct rounds per professor consultation (default 15), and `max_retrievals_per_answer` controls the maximum knowledge-base retrieval calls per answer (default 3; `0` disables retrieval for that professor answer and forces the professor to use its own knowledge, the context visible to that call, and patient files). The Professor Settings page also exposes `react_history_prompt_chars` (default 5000; when the complete work history exceeds this value, only its latest segment is inserted into the prompt) and `graffiti_summarize_threshold` (default 8000; exceeding it asks the professor to summarize the graffiti wall but does not automatically truncate it). The Rerank LLM section's `max_concurrency` (default 1, one call at a time; range 1–75) sets how many rerank requests run at once. Set it to what your server can handle: failed passages score 0 and are filtered out, and the `失敗 M/T 段` count in the log shows whether it is set too high. If the model still reports context overflow after work-history truncation, the professor answer fails closed and is not written to the forum.
 
 ## UI Tabs
 

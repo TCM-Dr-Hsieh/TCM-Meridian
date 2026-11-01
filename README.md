@@ -331,7 +331,8 @@ pip install -r requirements.txt -c constraints.txt
     "rerank": {
       "api_url": "http://localhost:1234/v1",
       "api_key": "lm-studio",
-      "model_name": ""
+      "model_name": "",
+      "max_concurrency": 1
     }
   }
 }
@@ -351,9 +352,9 @@ Main Agent 子模型 `main_agent.history_summary`（歷史病歷摘要/檢查）
 
 檢測強度（`hallucination_subagent.detection_strength`、`lc_subagent.detection_strength`）設為 `0` 代表研究對照組模式（不檢查直接放行）；`> 0` 時後端會 clamp 進 `[1, 對應最大輪次]`。模型設定頁會擋下留空、負值、以及檢測強度大於最大輪次的不合法組合。
 
-數值欄位的空值與 `0` 是分開處理的：「模型設定」與「教授設定」兩頁只有在欄位**清空**時才會回落預設值。允許 `0` 的欄位會照實保存，例如 `temperature=0` 可用於決定性輸出；要求正數的 `max_rounds`、`react_history_prompt_chars` 與 `graffiti_summarize_threshold` 則至少為 1。
+數值欄位的空值與 `0` 是分開處理的：「模型設定」與「教授設定」兩頁只有在欄位**清空**時才會回落預設值。允許 `0` 的欄位會照實保存，例如 `temperature=0` 可用於決定性輸出；要求正數的 `max_rounds`、`react_history_prompt_chars`、`graffiti_summarize_threshold` 與 `rerank.max_concurrency` 則至少為 1。
 
-教授 ReAct/RAG 另外分成回答模型、embedding、三前綴分類與 rerank 模型。`max_rounds` 控制每次教授諮詢最多 ReAct 輪數（預設 15），`max_retrievals_per_answer` 控制每次回答最多知識庫檢索次數（預設 3；設為 0 代表本次教授禁止查庫，只能用自身知識、當次可見上下文與患者檔案回答）。教授設定頁也可調整 `react_history_prompt_chars`（預設 5000；完整工作紀錄超過此值時，prompt 只放最新片段）與 `graffiti_summarize_threshold`（預設 8000；超過時提示教授優先整理塗鴉牆，但不自動截斷）。若截斷工作紀錄後仍被模型回報 context overflow，教授回答會 fail-closed 回錯誤，不寫入討論區。
+教授 ReAct/RAG 另外分成回答模型、embedding、三前綴分類與 rerank 模型。`max_rounds` 控制每次教授諮詢最多 ReAct 輪數（預設 15），`max_retrievals_per_answer` 控制每次回答最多知識庫檢索次數（預設 3；設為 0 代表本次教授禁止查庫，只能用自身知識、當次可見上下文與患者檔案回答）。教授設定頁也可調整 `react_history_prompt_chars`（預設 5000；完整工作紀錄超過此值時，prompt 只放最新片段）與 `graffiti_summarize_threshold`（預設 8000；超過時提示教授優先整理塗鴉牆，但不自動截斷）。Rerank LLM 區塊的「最大並行數」`max_concurrency`（預設 1，逐段呼叫；範圍 1–75）控制同時送出的 rerank 請求數，請依 server 能力設定：失敗的段落會記 0 分並被濾掉，可由 log 的「失敗 M/T 段」判斷是否設得太高。若截斷工作紀錄後仍被模型回報 context overflow，教授回答會 fail-closed 回錯誤，不寫入討論區。
 
 ## UI 分頁
 

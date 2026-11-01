@@ -372,6 +372,17 @@ def build_professor_settings_tab(
                     min=0,
                     max=2,
                 ).classes("w-full")
+            if section_key == "rerank":
+                inputs["max_concurrency"] = ui.number(
+                    "最大並行數",
+                    value=section_cfg.get("max_concurrency", 1),
+                    min=1,
+                    max=75,
+                    step=1,
+                ).classes("w-full").tooltip(
+                    "同時送出的 rerank 請求數，1 為逐段呼叫。"
+                    "請依 server 能力設定；太高時失敗的段落會被濾掉，可看 log 的失敗段數。"
+                )
             model_inputs[section_key] = inputs
 
     def _save_professor_config():
@@ -400,6 +411,8 @@ def build_professor_settings_tab(
             if sk == "answer":
                 pc[sk]["max_tokens"] = int(_read_number_or_default(inp["max_tokens"], 20000))
                 pc[sk]["temperature"] = float(_read_number_or_default(inp["temperature"], 0.7))
+            if sk == "rerank":
+                pc[sk]["max_concurrency"] = max(1, int(_read_number_or_default(inp["max_concurrency"], 1)))
         current_cfg["professor_config"] = pc
         save_config(current_cfg)
         agent = agent_run_state.get_agent()

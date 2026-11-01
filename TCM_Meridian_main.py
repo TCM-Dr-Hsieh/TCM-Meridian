@@ -169,6 +169,7 @@ def _default_config() -> dict:
                 "api_url": "http://localhost:1234/v1",
                 "api_key": "lm-studio",
                 "model_name": "",
+                "max_concurrency": 1,
             },
         },
         "voice_config": VoiceSettings().to_dict(),

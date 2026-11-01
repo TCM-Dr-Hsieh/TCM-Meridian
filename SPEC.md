@@ -206,9 +206,10 @@ Runtime prompts
 - 呼叫 `build_professor_index()` 建立 Chroma index。建立成功後會清除主 Agent 對該教授的 `ProfessorInstance` cache，使重建後的索引在下次諮詢即生效。
 - 設定教授共用模型：`answer`、`embedding`、`prefix`、`rerank`。
 - 設定教授 ReAct 上限：`max_rounds`（預設 15）與 `max_retrievals_per_answer`（預設 3；可設 0 禁止單次回答查庫）。
+- 設定 Rerank 最大並行數：`rerank.max_concurrency`（預設 1，逐段呼叫；範圍 1–75）。
 - 設定教授跨問答上下文門檻：`react_history_prompt_chars`（預設 5000；prompt 僅保留最新片段）與 `graffiti_summarize_threshold`（預設 8000；只提示 summarize，不自動截斷）。
 - 儲存教授共用模型設定後，若仍存在 Main Agent instance，清空其全部教授 instance cache 與 `_professor_memory`（塗鴉牆與 ReAct 工作紀錄），避免新設定下的教授延用舊模型產生的記憶。其他教授頁操作依各自語意處理快取；由於這些操作都要求先退出患者，正常 UI 流程下不會殘留患者 session 的教授 instance。
-- 數值欄位統一以 `_read_number_or_default()` 讀取：只有 `None` 或空字串才回落預設值；`temperature=0` 與 `max_retrievals_per_answer=0` 是有效設定，`max_rounds`、`react_history_prompt_chars` 與 `graffiti_summarize_threshold` 則至少為 1。
+- 數值欄位統一以 `_read_number_or_default()` 讀取：只有 `None` 或空字串才回落預設值；`temperature=0` 與 `max_retrievals_per_answer=0` 是有效設定，`max_rounds`、`react_history_prompt_chars`、`graffiti_summarize_threshold` 與 `rerank.max_concurrency` 則至少為 1。
 
 教授頁所有會改動全域狀態的操作（新增教授、儲存教授資料、建立資料庫、刪除教授、儲存教授共用模型）都要求先退出患者；有患者載入時這些按鈕會 disable 並提示，handler 也保留二次檢查。退出患者會清除 Main Agent 與 ProfessorInstance，因此儲存教授資料時不需要額外處理 runtime cache 或教授 session 記憶。此規則與「標準病歷模板設定」「模型設定」一致：全域資源只能在無患者狀態變更，避免執行中 Agent 的快取或記憶與磁碟設定脫鉤。刪除教授與重建索引前會先釋放 Chroma 連線與 mmap 檔案控制代碼（`release_chroma_handles()`），避免 Windows 上 `chroma_doc_index` 檔案被占用而刪除失敗。
 
@@ -512,7 +513,7 @@ Main Agent 使用習慣：
 
 所有 LLM client 都採 OpenAI-compatible API。
 
-數值欄位的空值與 `0` 分開處理：「模型設定」與「教授設定」兩頁的數值欄位都以 `read_number_or_default()` / `_read_number_or_default()` 讀取——只有 `None` 或空字串才回落預設值。`temperature=0` 用於決定性輸出，`max_retrievals_per_answer=0` 用於禁止查庫；必須為正數的 `max_rounds`、`react_history_prompt_chars` 與 `graffiti_summarize_threshold` 在 UI 與保存/runtime 端至少為 1。幻覺審查的 `detection_strength` 改用 `read_strength_or_none()`，因為 `0` 代表「停用安全檢查的對照組」，欄位留空必須明確擋下並提示，不可靜默視為 `0`。
+數值欄位的空值與 `0` 分開處理：「模型設定」與「教授設定」兩頁的數值欄位都以 `read_number_or_default()` / `_read_number_or_default()` 讀取——只有 `None` 或空字串才回落預設值。`temperature=0` 用於決定性輸出，`max_retrievals_per_answer=0` 用於禁止查庫；必須為正數的 `max_rounds`、`react_history_prompt_chars`、`graffiti_summarize_threshold` 與 `rerank.max_concurrency` 在 UI 與保存/runtime 端至少為 1。幻覺審查的 `detection_strength` 改用 `read_strength_or_none()`，因為 `0` 代表「停用安全檢查的對照組」，欄位留空必須明確擋下並提示，不可靜默視為 `0`。
 
 ## 8. Main Agent 規格
 
@@ -821,11 +822,13 @@ RAG_RERANK_AUTO = 0.7
 RAG_MIN_PARENTS = 10
 RAG_MAX_PARENTS = 18
 EMB_NORMALIZE = True
+EMB_MAX_CHARS_PER_INPUT = 3000
 
 PROFESSOR_DEFAULT_MAX_ROUNDS = 15                    # config 未設定時的 max_rounds
 PROFESSOR_DEFAULT_MAX_RETRIEVALS_PER_ANSWER = 3      # config 未設定時的 max_retrievals_per_answer
 PROFESSOR_DEFAULT_REACT_HISTORY_PROMPT_CHARS = 5000   # config 未設定時，react_history 進 prompt 的字數上限
 PROFESSOR_DEFAULT_GRAFFITI_SUMMARIZE_THRESHOLD = 8000 # config 未設定時，提示 summarize 的塗鴉牆字數
+PROFESSOR_DEFAULT_RERANK_MAX_CONCURRENCY = 1         # config 未設定時的 rerank.max_concurrency
 PROFESSOR_MAX_JSON_RETRIES = 3                       # 每輪 JSON 解析失敗的重試次數
 
 CHUNK_SIZE = 400
@@ -834,7 +837,9 @@ CHUNK_SIZE_CASE = 280
 CHUNK_OVER_CASE = 70
 ```
 
-RAG/切塊參數與 `PROFESSOR_MAX_JSON_RETRIES` 仍是程式碼常數。四個 `PROFESSOR_DEFAULT_*` 只是 `professor_config` 缺值時的回落值；`max_rounds`、`max_retrievals_per_answer`、`react_history_prompt_chars` 與 `graffiti_summarize_threshold` 的實際值都由「教授設定」分頁寫入 `config.json`。
+RAG/切塊參數與 `PROFESSOR_MAX_JSON_RETRIES` 仍是程式碼常數。五個 `PROFESSOR_DEFAULT_*` 只是 `professor_config` 缺值時的回落值；`max_rounds`、`max_retrievals_per_answer`、`react_history_prompt_chars`、`graffiti_summarize_threshold` 與 `rerank.max_concurrency` 的實際值都由「教授設定」分頁寫入 `config.json`。
+
+`EMB_MAX_CHARS_PER_INPUT` 同時套用於 query 與文件，但子塊最長約 430 字不受影響，調整後不需重建索引。origin query 是【今日病歷】在前、【提問】在後，上限必須容得下 NOTE 加提問，否則提問會被截掉。上限也必須低於 embedding 伺服器載入的 context：LM Studio 超過時不報錯，只靜默截斷尾端，提問同樣會遺失（`Qwen3-Embedding-4B` 實測約 1 字 0.94 token，3000 字需要 context 約 3000 以上）。
 
 ### 10.4 建立索引
 
@@ -1007,7 +1012,7 @@ F 的 4 次逐項否認均被幻覺審查放行，LC 只標出其中 1 次（1/4
 #### 其他兩個 prompt 的輸出契約
 
 - `prompt_3_prefix.txt`：輸出**三個前綴詞、以半形空格分隔、無其他文字**。可用前綴共 16 項（`case`、`formula`、`herb`、`acupuncture`、`diagnoses`、`treatment`、七類 `disease-*`、`theory`、`classic`、`others`）。程式端會正規化、去重、不足補 `others`、統一小寫，解析或呼叫失敗一律回落 `["others","others","others"]`。程式雖支援 `NoRAG`（`_CANON` 與 `_PREFIX_REGEX` 皆有），但現行前綴 prompt 未將其列為可選項。
-- `prompt_rerank.txt`：輸出**單一 0.00–1.00 數值**，不得有任何解釋或單位。使用 11 階量表，其中 `0.1` 專門用於「含中醫理法謬誤、配伍禁忌或具潛在臨床危害」的段落，使錯誤知識比無關知識受到更重的懲罰。程式以 `re.search(r"\d*\.?\d+")` 取第一個數字，解析或呼叫失敗記 `0.0`（低於 `RAG_RERANK_FLOOR` 而被濾除）。
+- `prompt_rerank.txt`：輸出**單一 0.00–1.00 數值**，不得有任何解釋或單位。使用 11 階量表，其中 `0.1` 專門用於「含中醫理法謬誤、配伍禁忌或具潛在臨床危害」的段落，使錯誤知識比無關知識受到更重的懲罰。程式以 `re.search(r"\d*\.?\d+")` 取第一個數字，解析或呼叫失敗記 `0.0`（低於 `RAG_RERANK_FLOOR` 而被濾除），失敗段數顯示在 `[LLM Rerank]` 耗時 log（`並行 N，失敗 M/T 段`），用來判斷 `rerank.max_concurrency` 是否設得太高；模型如實回 `0.0` 不算失敗。各父段以 `ThreadPoolExecutor` 同時評分，實際並行數取 `max_concurrency` 與段數的較小值，結果依原順序收回後排序，同分時的順序與逐段呼叫相同。
 
 #### 客製化與模板對齊
 
@@ -1056,7 +1061,7 @@ F 的 4 次逐項否認均被幻覺審查放行，LC 只標出其中 1 次（1/4
 - Professor Subagent 有 `max_rounds`（預設 15）與 `max_retrievals_per_answer`（預設 3；`0` 為對照組，完全不查庫），並採 **fail-closed**：`answer()` 只要回傳 `error`（Answer LLM 未設定、強制回覆失敗或回傳空 answer、截斷後仍 context overflow），主 Agent 就不寫入醫療問答討論區、不寫 RAG log，只在步驟結果標示失敗——錯誤文字不會被當成教授意見。達 `max_rounds` 後由 `_force_reply_to_forum()` 強制整理回答，成功時回傳 `forced=True`，主 Agent 會在該則討論區貼文前加上「達輪數上限後強制整理，資訊可能不完整」提示。
 - 教授設定頁可保存自訂的 `react_history_prompt_chars` 與 `graffiti_summarize_threshold`；下一次教授諮詢的工作紀錄截斷、塗鴉牆字數提示、behavior meta/log 與 context-overflow 錯誤文字皆使用新值，缺少欄位時回落 5000／8000。
 - Professor 的 `react_history` 完整保存但每筆有界（`thought_summary` 截 300 字、`action_input` 只存 20 字 preview 與字數、`observation` 只存摘要，檢索原文不入長期紀錄）；組 prompt 時若格式化後超過 `professor_config.react_history_prompt_chars`（預設 5000）只放最新片段（記 `professor_react_history_truncated`，屬正常狀態）。若截斷後 provider 仍回報 context overflow，不再嘗試多層降階，直接 fail-closed 回 `error`。provider error 解析會讀取例外的 `status_code`／`code`／`type`／`body`／`response.json()` 與文字訊息，HTTP 413 與常見 context/token marker 視為 overflow，rate-limit / quota 類錯誤則排除在外。
-- Professor 支援合作式中斷：主 Agent 把 `_manual_stop_event` 傳入 `answer()`，在每輪開頭、每次 LLM 呼叫前後與 JSON 重試前、工具執行入口、檢索前後與 rerank 每個父段前檢查；已送出的同步 API 呼叫本身不會被強制取消，需等待返回後才能收斂。中斷時回傳 `error="manual_stop"`，不寫討論區也不寫 RAG log。
+- Professor 支援合作式中斷：主 Agent 把 `_manual_stop_event` 傳入 `answer()`，在每輪開頭、每次 LLM 呼叫前後與 JSON 重試前、工具執行入口、檢索前後與 rerank 每個父段送出前檢查（並行時未送出的父段直接跳過）；已送出的同步 API 呼叫本身不會被強制取消，需等待返回後才能收斂。中斷時回傳 `error="manual_stop"`，不寫討論區也不寫 RAG log。
 - 主 Agent 達 `MAX_SUB_TURNS` 上限時會正式收斂主輪，不殘留 `_active_turn`。
 - IC 未設定 model 時，主 Agent 不會進入永久暫停；殘留孤兒 `_suspended` 會在下個主輪或還原時清除。
 - 主 Agent 與問診流程支援合作式中斷。

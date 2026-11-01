@@ -21,6 +21,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import requests
@@ -42,11 +43,13 @@ RAG_RERANK_AUTO = 0.7      # Rerank 自動選取門檻
 RAG_MIN_PARENTS = 10       # 最少父段數（不足時 backfill）
 RAG_MAX_PARENTS = 18       # 最多父段數
 EMB_NORMALIZE = True       # 是否 L2 正規化 embedding
+EMB_MAX_CHARS_PER_INPUT = 3000  # 單次 embedding 輸入字數上限；需低於伺服器載入的 context，否則尾端被靜默截斷
 
 PROFESSOR_DEFAULT_MAX_ROUNDS = 15
 PROFESSOR_DEFAULT_MAX_RETRIEVALS_PER_ANSWER = 3
 PROFESSOR_DEFAULT_REACT_HISTORY_PROMPT_CHARS = 5000
 PROFESSOR_DEFAULT_GRAFFITI_SUMMARIZE_THRESHOLD = 8000
+PROFESSOR_DEFAULT_RERANK_MAX_CONCURRENCY = 1
 PROFESSOR_MAX_JSON_RETRIES = 3
 PROFESSOR_DEFAULT_ROLE_STYLE = "請維持資深中醫教授的客觀、嚴謹、臨床導向回答風格。"
 
@@ -75,7 +78,7 @@ class LMStudioEmbeddings:
         timeout: int = 120,
         query_instruction: str = "Instruct: Given a user question, retrieve passages that directly answer it.\nQuery: ",
         embed_instruction: str = "",
-        max_chars_per_input: int = 900,
+        max_chars_per_input: int = EMB_MAX_CHARS_PER_INPUT,
         verbose: bool = False,
     ):
         self.base_url = base_url.rstrip("/")
@@ -205,7 +208,7 @@ class ProfessorInstance:
                     "answer": {"api_url", "api_key", "model_name", "max_tokens", "temperature"},
                     "embedding": {"api_url", "api_key", "model_name"},
                     "prefix": {"api_url", "api_key", "model_name"},
-                    "rerank": {"api_url", "api_key", "model_name"},
+                    "rerank": {"api_url", "api_key", "model_name", "max_concurrency"},
                 }
         """
         self.professor_id = professor_id
@@ -377,7 +380,7 @@ class ProfessorInstance:
             api_key=emb_cfg.get("api_key", "lm-studio"),
             model=emb_cfg.get("model_name", ""),
             batch_size=32,
-            max_chars_per_input=900,
+            max_chars_per_input=EMB_MAX_CHARS_PER_INPUT,
         )
 
         # 載入 parent_map
@@ -2145,14 +2148,25 @@ reply_to_forum 是唯一正常結束方式；若尚未足以回答，請使用�
             out.sort(key=lambda x: x[1], reverse=True)
             return out
 
+        if not docs_with_dense:
+            return []
+
         client = self._get_rerank_client()
-        out: List[tuple] = []
+        concurrency = min(
+            self._parse_positive_int_setting(
+                rrk_cfg,
+                "max_concurrency",
+                PROFESSOR_DEFAULT_RERANK_MAX_CONCURRENCY,
+            ),
+            len(docs_with_dense),
+        )
         t0 = time.perf_counter()
 
-        for doc, dense_score in docs_with_dense:
+        def _score_parent(item: tuple) -> tuple[tuple, bool] | None:
+            """回傳 ((rerank, dense, doc), 是否失敗)；已手動中斷時回 None，不送出請求。"""
+            doc, dense_score = item
             if self._stop_requested(manual_stop_event):
-                _log(f"[Professor {self.professor_id}] [LLM Rerank] 收到手動中斷")
-                break
+                return None
             chunk_txt = doc.page_content.strip().replace("\n", " ")
             rerank_input = f"問題：{query}\n\n段落：{chunk_txt}\n分析相關度分數（0~1）："
             messages = [
@@ -2166,13 +2180,25 @@ reply_to_forum 是唯一正常結束方式；若尚未足以回答，請使用�
                 )
                 gen_txt = (resp.choices[0].message.content or "").strip()
                 m = re.search(r"\d*\.?\d+", gen_txt)
-                rerank_score = float(m.group(0)) if m else 0.0
+                return (float(m.group(0)) if m else 0.0, dense_score, doc), m is None
             except Exception:
-                rerank_score = 0.0
-            out.append((rerank_score, dense_score, doc))
+                return (0.0, dense_score, doc), True
+
+        # executor.map 依原順序收回，同分時的排序不受並行影響
+        with ThreadPoolExecutor(max_workers=concurrency) as executor:
+            results = list(executor.map(_score_parent, docs_with_dense))
+
+        scored = [r for r in results if r is not None]
+        if len(scored) < len(results):
+            _log(f"[Professor {self.professor_id}] [LLM Rerank] 收到手動中斷")
+        out: List[tuple] = [entry for entry, _ in scored]
+        failed = sum(1 for _, is_failed in scored if is_failed)
 
         out.sort(key=lambda x: (x[0], x[1]), reverse=True)
-        _log(f"[Professor {self.professor_id}] [LLM Rerank] 耗時 {time.perf_counter() - t0:.2f}s")
+        _log(
+            f"[Professor {self.professor_id}] [LLM Rerank] 耗時 {time.perf_counter() - t0:.2f}s"
+            f"（並行 {concurrency}，失敗 {failed}/{len(out)} 段）"
+        )
         return out
 
 # ════════════════════════════════════════════════════════════════
@@ -2367,7 +2393,7 @@ def build_professor_index(
         api_key=emb_cfg.get("api_key", "lm-studio"),
         model=emb_model,
         batch_size=32,
-        max_chars_per_input=900,
+        max_chars_per_input=EMB_MAX_CHARS_PER_INPUT,
     )
 
     _log(f"[建立索引] 使用 Embedding 模型: {emb_model}")

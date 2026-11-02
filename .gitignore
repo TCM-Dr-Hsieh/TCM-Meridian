@@ -57,3 +57,8 @@ professor_04/
 
 # ── 上次開啟的患者與就診日期（程式自動寫入）──
 last_session.json
+
+# ── 脈圖外掛：作者本機工具，不隨專案發布 ──
+# 脈圖資料存於 patient_data/<患者>/pulse_data/，已由上方 patient_data/* 排除。
+pulse_chart_plug_in.py
+pulse_chart/
